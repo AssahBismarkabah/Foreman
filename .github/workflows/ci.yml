@@ -20,7 +20,7 @@ jobs:
         run: curl -fsSL https://opencode.ai/install | bash
 
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin latest
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
       - run: make build
       - run: make test
