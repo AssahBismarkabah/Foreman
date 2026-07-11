@@ -11,7 +11,7 @@ Tell it what needs done in Slack or Discord. Foreman decides which agents to use
 ## Status
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Diagrams: [docs/diagrams/](docs/diagrams/)
-- Tracker: [TODO.md](TODO.md)
+- Tracker: [TODO.md](docs/TODO.md)
 
 ---
 
