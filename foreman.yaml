@@ -1,0 +1,24 @@
+subsystems:
+  eventbus:
+    kind: memory
+  sandbox:
+    kind: docker
+    image: ubuntu:22.04
+  coordinator:
+    max_concurrent: 5
+    default_timeout: 5m
+  agents:
+    - name: opencode
+      kind: opencode
+      cmd: npx opencode
+      cwd: /tmp/opencode-workspace
+      heartbeat_interval: 30s
+      heartbeat_timeout: 90s
+  mcphub:
+    servers:
+      - name: filesystem
+        transport: stdio
+        command: npx
+        args:
+          - "@modelcontextprotocol/server-filesystem"
+          - /tmp

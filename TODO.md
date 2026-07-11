@@ -11,16 +11,16 @@
 
 Goal: Core daemon running with a single agent type and local Docker sandbox.
 
-- [ ] Go project scaffold (module structure, build, CI)
-- [ ] Core Service skeleton (config, startup, shutdown, health)
-- [ ] Config file parsing (foreman.yaml)
+- [X] Go project scaffold (module structure, build, CI)
+- [X] Core Service skeleton (config, startup, shutdown, health)
+- [X] Config file parsing (foreman.yaml)
 - [ ] State Store schema + PostgreSQL connection
 - [ ] Event Bus (NATS) integration
-- [ ] Control Plane with session state machine
-- [ ] Agent Coordinator with local Docker sandbox provisioning
-- [ ] One Agent Adapter (OpenCode, as the first target)
-- [ ] MCP Hub with filesystem and git tools
-- [ ] Foreman CLI (serve + task subcommands)
+- [X] Control Plane with session state machine
+- [X] Agent Coordinator with local Docker sandbox provisioning
+- [X] One Agent Adapter (OpenCode, as the first target)
+- [X] MCP Hub with filesystem and git tools
+- [X] Foreman CLI (serve + task subcommands)
 - [ ] Session recovery on restart (happy path)
 
 **Checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back.

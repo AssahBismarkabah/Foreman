@@ -1,0 +1,138 @@
+package controlplane
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/foreman/foreman/internal/eventbus"
+	"github.com/foreman/foreman/internal/schemas"
+)
+
+type SessionStatus string
+
+const (
+	StatusCreated    SessionStatus = "CREATED"
+	StatusAllocating SessionStatus = "ALLOCATING"
+	StatusRunning    SessionStatus = "RUNNING"
+	StatusApproval   SessionStatus = "APPROVAL"
+	StatusCancelling SessionStatus = "CANCELLING"
+	StatusCompleted  SessionStatus = "COMPLETED"
+	StatusFailed     SessionStatus = "FAILED"
+)
+
+var validTransitions = map[SessionStatus][]SessionStatus{
+	StatusCreated:    {StatusAllocating, StatusFailed},
+	StatusAllocating: {StatusRunning, StatusFailed},
+	StatusRunning:    {StatusApproval, StatusCompleted, StatusCancelling, StatusFailed},
+	StatusApproval:   {StatusRunning, StatusCancelling, StatusFailed},
+	StatusCancelling: {StatusFailed, StatusCompleted},
+}
+
+type Session struct {
+	ID        string
+	Status    SessionStatus
+	TaskID    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	mu        sync.RWMutex
+}
+
+type ControlPlane struct {
+	bus      eventbus.EventBus
+	sessions map[string]*Session
+	mu       sync.RWMutex
+}
+
+func New(bus eventbus.EventBus) *ControlPlane {
+	return &ControlPlane{
+		bus:      bus,
+		sessions: make(map[string]*Session),
+	}
+}
+
+func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID string) error {
+	s := &Session{
+		ID:        sessionID,
+		Status:    StatusCreated,
+		TaskID:    taskID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	cp.mu.Lock()
+	cp.sessions[sessionID] = s
+	cp.mu.Unlock()
+	return cp.emit(ctx, s, schemas.EvSessionCreated)
+}
+
+func (cp *ControlPlane) Transition(ctx context.Context, sessionID string, to SessionStatus) error {
+	cp.mu.Lock()
+	s, ok := cp.sessions[sessionID]
+	cp.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	allowed, ok := validTransitions[s.Status]
+	if !ok {
+		return fmt.Errorf("no transitions defined from %s", s.Status)
+	}
+	valid := false
+	for _, t := range allowed {
+		if t == to {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("invalid transition %s -> %s", s.Status, to)
+	}
+	s.Status = to
+	s.UpdatedAt = time.Now()
+
+	var evtType schemas.EventType
+	switch to {
+	case StatusAllocating:
+		evtType = schemas.EvSessionAllocating
+	case StatusRunning:
+		evtType = schemas.EvSessionRunning
+	case StatusApproval:
+		evtType = schemas.EvSessionApproval
+	case StatusCancelling:
+		evtType = schemas.EvSessionCancelling
+	case StatusCompleted:
+		evtType = schemas.EvSessionCompleted
+	case StatusFailed:
+		evtType = schemas.EvSessionFailed
+	default:
+		return fmt.Errorf("unknown status: %s", to)
+	}
+	return cp.emit(ctx, s, evtType)
+}
+
+func (cp *ControlPlane) GetSession(sessionID string) (*Session, bool) {
+	cp.mu.RLock()
+	s, ok := cp.sessions[sessionID]
+	cp.mu.RUnlock()
+	return s, ok
+}
+
+func (cp *ControlPlane) emit(ctx context.Context, s *Session, evtType schemas.EventType) error {
+	evt := schemas.Event{
+		ID:        fmt.Sprintf("%s-%d", s.ID, time.Now().UnixNano()),
+		Type:      evtType,
+		SessionID: s.ID,
+		Timestamp: time.Now(),
+		Payload: schemas.SessionPayload{
+			SessionID: s.ID,
+			TaskID:    s.TaskID,
+			Status:    string(s.Status),
+		},
+	}
+	subject := schemas.SessionEventSubject(s.ID, evtType)
+	return cp.bus.Publish(ctx, subject, evt)
+}
