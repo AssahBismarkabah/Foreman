@@ -105,7 +105,9 @@ func (p *CLI) readOutput(ctx context.Context, stdout io.Reader) {
 			Payload:   string(line),
 		}
 		if p.bus != nil {
-			p.bus.Publish(ctx, schemas.Subject("agent", p.name, "output"), evt)
+			if err := p.bus.Publish(ctx, schemas.Subject("agent", p.name, "output"), evt); err != nil {
+				log.Printf("plugin %s: publish output event: %v", p.name, err)
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -116,6 +118,8 @@ func (p *CLI) readOutput(ctx context.Context, stdout io.Reader) {
 		Timestamp: time.Now(),
 	}
 	if p.bus != nil {
-		p.bus.Publish(ctx, schemas.Subject("agent", p.name, "done"), evt)
+		if err := p.bus.Publish(ctx, schemas.Subject("agent", p.name, "done"), evt); err != nil {
+			log.Printf("plugin %s: publish done event: %v", p.name, err)
+		}
 	}
 }

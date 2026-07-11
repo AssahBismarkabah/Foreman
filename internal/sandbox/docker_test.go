@@ -56,7 +56,9 @@ func TestDockerSandbox_Execute(t *testing.T) {
 		t.Fatalf("Provision: %v", err)
 	}
 	defer func() {
-		s.Destroy(ctx, sessionID)
+		if derr := s.Destroy(ctx, sessionID); derr != nil {
+			t.Logf("Destroy: %v", derr)
+		}
 	}()
 
 	res, err := s.Execute(ctx, sessionID, []string{"echo", "hello world"}, 5*time.Second)
@@ -82,7 +84,9 @@ func TestDockerSandbox_WriteAndReadFile(t *testing.T) {
 		t.Fatalf("Provision: %v", err)
 	}
 	defer func() {
-		s.Destroy(ctx, sessionID)
+		if derr := s.Destroy(ctx, sessionID); derr != nil {
+			t.Logf("Destroy: %v", derr)
+		}
 	}()
 
 	content := []byte("hello from foreman test")
@@ -110,7 +114,9 @@ func TestDockerSandbox_ExecuteWithExitCode(t *testing.T) {
 		t.Fatalf("Provision: %v", err)
 	}
 	defer func() {
-		s.Destroy(ctx, sessionID)
+		if derr := s.Destroy(ctx, sessionID); derr != nil {
+			t.Logf("Destroy: %v", derr)
+		}
 	}()
 
 	res, err := s.Execute(ctx, sessionID, []string{"sh", "-c", "exit 42"}, 5*time.Second)
@@ -136,7 +142,9 @@ func TestDockerSandbox_SubscribeEvents(t *testing.T) {
 	}
 	// Destroy in defer regardless
 	defer func() {
-		s.Destroy(ctx, sessionID)
+		if derr := s.Destroy(ctx, sessionID); derr != nil {
+			t.Logf("Destroy: %v", derr)
+		}
 	}()
 
 	// SubscribeEvents returns a channel that follows container logs.

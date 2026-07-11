@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -76,9 +77,16 @@ func (d *DockerSandbox) Provision(ctx context.Context, spec SandboxSpec) (string
 	args = append(args, img)
 	args = append(args, keepAliveArgs...)
 
-	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	// Use Output() (stdout only), NOT CombinedOutput(), because docker run -d writes
+	// the container ID to stdout but may write pull progress to stderr. CombinedOutput
+	// merges both, polluting the container ID.
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("docker run: %w\noutput: %s", err, strings.TrimSpace(string(out)))
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("docker run: %w\nstderr: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", fmt.Errorf("docker run: %w", err)
 	}
 	containerID := strings.TrimSpace(string(out))
 
@@ -146,7 +154,7 @@ func (d *DockerSandbox) WriteFile(ctx context.Context, sessionID, path string, c
 
 	errBuf := new(bytes.Buffer)
 	if _, err := io.Copy(errBuf, stderr); err != nil {
-		cmd.Wait()
+		_ = cmd.Wait()
 		return fmt.Errorf("read stderr: %w", err)
 	}
 
@@ -195,12 +203,12 @@ func (d *DockerSandbox) UploadCheckpoint(ctx context.Context, sessionID, sourceD
 		return "", fmt.Errorf("tar start: %w", err)
 	}
 	if err := dockerCmd.Start(); err != nil {
-		tarCmd.Wait()
+		_ = tarCmd.Wait()
 		return "", fmt.Errorf("docker tar start: %w", err)
 	}
 
 	if err := tarCmd.Wait(); err != nil {
-		dockerCmd.Wait()
+		_ = dockerCmd.Wait()
 		return "", fmt.Errorf("tar wait: %w", err)
 	}
 	if err := dockerCmd.Wait(); err != nil {
@@ -235,7 +243,9 @@ func (d *DockerSandbox) SubscribeEvents(ctx context.Context, sessionID string) (
 
 	go func() {
 		defer func() {
-			cmd.Wait()
+			if err := cmd.Wait(); err != nil {
+				log.Printf("docker logs wait: %v", err)
+			}
 			close(ch)
 		}()
 
@@ -272,13 +282,12 @@ func scanStream(ctx context.Context, ch chan<- SandboxEvent, r io.Reader, stream
 }
 
 func (d *DockerSandbox) Heartbeat(ctx context.Context, sessionID string) error {
-	cs, err := d.lookup(sessionID)
-	if err != nil {
+	if _, err := d.lookup(sessionID); err != nil {
 		return err
 	}
 
-	// Check if the container is still alive via docker inspect
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Status}}", cs.id)
+	// Use the container name (sessionID) so docker inspect can find it
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Status}}", sessionID)
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("docker inspect: %w", err)

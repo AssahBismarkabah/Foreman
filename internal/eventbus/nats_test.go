@@ -19,7 +19,7 @@ func newTestNATSBus(ctx context.Context, t *testing.T) *NATSBus {
 	// Purge any messages from previous tests so consumers with DeliverAllPolicy
 	// only see messages published during this test.
 	if err := bus.stream.Purge(ctx); err != nil {
-		bus.Close()
+		_ = bus.Close()
 		t.Fatalf("purge stream: %v", err)
 	}
 	return bus
@@ -89,7 +89,9 @@ func TestNATSEmbeddedMultipleSubscribers(t *testing.T) {
 	defer cancel()
 
 	bus := newTestNATSBus(ctx, t)
-	defer bus.Close()
+	defer func() {
+		_ = bus.Close()
+	}()
 
 	var mu sync.Mutex
 	count1, count2 := 0, 0
@@ -140,7 +142,9 @@ func TestNATSEmbeddedWildcardSubject(t *testing.T) {
 	defer cancel()
 
 	bus := newTestNATSBus(ctx, t)
-	defer bus.Close()
+	defer func() {
+		_ = bus.Close()
+	}()
 
 	received := make(chan schemas.Event, 2)
 	unsub, err := bus.Subscribe(ctx, "foreman.session.>", func(ctx context.Context, evt schemas.Event) error {
@@ -178,7 +182,9 @@ func TestNATSEmbeddedNoCrossTalk(t *testing.T) {
 	defer cancel()
 
 	bus := newTestNATSBus(ctx, t)
-	defer bus.Close()
+	defer func() {
+		_ = bus.Close()
+	}()
 
 	received := make(chan schemas.Event, 1)
 	unsub, err := bus.Subscribe(ctx, "foreman.session.>", func(ctx context.Context, evt schemas.Event) error {
@@ -217,7 +223,9 @@ func TestNATSEmbeddedPubBeforeSub(t *testing.T) {
 	defer cancel()
 
 	bus := newTestNATSBus(ctx, t)
-	defer bus.Close()
+	defer func() {
+		_ = bus.Close()
+	}()
 
 	// Publish first
 	evt := schemas.Event{ID: "pub-before-sub", Type: schemas.EvSessionCreated, Timestamp: time.Now()}

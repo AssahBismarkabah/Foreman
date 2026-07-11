@@ -19,6 +19,11 @@ jobs:
       - name: Install opencode
         run: curl -fsSL https://opencode.ai/install | bash
 
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
       - run: make build
       - run: make test
-      - run: make lint
+      - run: golangci-lint run ./...

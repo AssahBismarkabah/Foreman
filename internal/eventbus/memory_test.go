@@ -121,7 +121,9 @@ func TestMemoryBusUnsubscribe(t *testing.T) {
 	)
 
 	evt := schemas.Event{ID: "1"}
-	bus.Publish(ctx, "test.subject", evt)
+	if err := bus.Publish(ctx, "test.subject", evt); err != nil {
+		t.Fatal(err)
+	}
 
 	if count != 1 {
 		t.Fatalf("expected 1 before unsubscribe, got %d", count)
@@ -129,7 +131,9 @@ func TestMemoryBusUnsubscribe(t *testing.T) {
 
 	cancel()
 
-	bus.Publish(ctx, "test.subject", evt)
+	if err := bus.Publish(ctx, "test.subject", evt); err != nil {
+		t.Fatal(err)
+	}
 
 	if count != 1 {
 		t.Errorf("expected 1 after unsubscribe, got %d", count)
@@ -176,7 +180,9 @@ func TestMemoryBusWildcardSubscribe(t *testing.T) {
 	defer cancel()
 
 	// "foreman.session.>" should match "foreman.session.created"
-	bus.Publish(ctx, "foreman.session.created", schemas.Event{ID: "1"})
+	if err := bus.Publish(ctx, "foreman.session.created", schemas.Event{ID: "1"}); err != nil {
+		t.Fatal(err)
+	}
 	if !called {
 		t.Error("expected wildcard 'foreman.session.>' to match 'foreman.session.created'")
 	}
@@ -192,7 +198,9 @@ func TestMemoryBusWildcardSubscribe(t *testing.T) {
 	defer cancel2()
 
 	// "foreman.*" should match exactly one token: "foreman.session"
-	bus.Publish(ctx, "foreman.session", schemas.Event{ID: "2"})
+	if err := bus.Publish(ctx, "foreman.session", schemas.Event{ID: "2"}); err != nil {
+		t.Fatal(err)
+	}
 	if !called {
 		t.Error("expected wildcard 'foreman.*' to match 'foreman.session'")
 	}
@@ -212,7 +220,9 @@ func TestMemoryBusWildcardNoMatch(t *testing.T) {
 	defer cancel()
 
 	// "foreman.session.>" should NOT match "other.subject"
-	bus.Publish(ctx, "other.subject", schemas.Event{ID: "1"})
+	if err := bus.Publish(ctx, "other.subject", schemas.Event{ID: "1"}); err != nil {
+		t.Fatal(err)
+	}
 	if called {
 		t.Error("expected no match for different subject")
 	}
@@ -232,14 +242,18 @@ func TestMemoryBusSingleWildcard(t *testing.T) {
 	defer cancel()
 
 	// "foreman.*.created" should match "foreman.session.created"
-	bus.Publish(ctx, "foreman.session.created", schemas.Event{ID: "1"})
+	if err := bus.Publish(ctx, "foreman.session.created", schemas.Event{ID: "1"}); err != nil {
+		t.Fatal(err)
+	}
 	if !called {
 		t.Error("expected 'foreman.*.created' to match 'foreman.session.created'")
 	}
 
 	// But should NOT match "foreman.session.other"
 	called = false
-	bus.Publish(ctx, "foreman.session.other", schemas.Event{ID: "2"})
+	if err := bus.Publish(ctx, "foreman.session.other", schemas.Event{ID: "2"}); err != nil {
+		t.Fatal(err)
+	}
 	if called {
 		t.Error("expected 'foreman.*.created' to not match 'foreman.session.other'")
 	}
@@ -268,7 +282,7 @@ func TestMemoryBusConcurrentPublish(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			bus.Publish(ctx, "test.subject", schemas.Event{ID: "1"})
+			_ = bus.Publish(ctx, "test.subject", schemas.Event{ID: "1"})
 		}(i)
 	}
 	wg.Wait()

@@ -16,10 +16,13 @@ func writeTempConfig(t *testing.T, content string) string {
 		t.Fatalf("create temp config: %v", err)
 	}
 	if _, err := f.Write([]byte(content)); err != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name())
 		t.Fatalf("write temp config: %v", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		t.Fatalf("close temp config: %v", err)
+	}
 	return f.Name()
 }
 
@@ -34,7 +37,7 @@ subsystems:
     default_timeout: 5m
 `
 	configPath := writeTempConfig(t, yaml)
-	defer os.Remove(configPath)
+	defer func() { _ = os.Remove(configPath) }()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -94,7 +97,7 @@ subsystems:
           - /tmp
 `
 	configPath := writeTempConfig(t, yaml)
-	defer os.Remove(configPath)
+	defer func() { _ = os.Remove(configPath) }()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -130,7 +133,7 @@ subsystems:
     max_concurrent: 5
 `
 	configPath := writeTempConfig(t, yaml)
-	defer os.Remove(configPath)
+	defer func() { _ = os.Remove(configPath) }()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -153,7 +156,7 @@ subsystems:
     max_concurrent: 5
 `
 	configPath := writeTempConfig(t, yaml)
-	defer os.Remove(configPath)
+	defer func() { _ = os.Remove(configPath) }()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -177,7 +180,7 @@ subsystems:
     max_concurrent: 5
 `
 	configPath := writeTempConfig(t, yaml)
-	defer os.Remove(configPath)
+	defer func() { _ = os.Remove(configPath) }()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {

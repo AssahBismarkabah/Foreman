@@ -38,12 +38,16 @@ subsystems:
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
+	defer func() {
+		_ = os.Remove(f.Name())
+	}()
 
 	if _, err := f.Write([]byte(yaml)); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := Load(f.Name())
 	if err != nil {
@@ -88,12 +92,16 @@ func TestLoadMinimalYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
+	defer func() {
+		_ = os.Remove(f.Name())
+	}()
 
 	if _, err := f.Write([]byte(yaml)); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := Load(f.Name())
 	if err != nil {
@@ -121,12 +129,16 @@ func TestLoadInvalidYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
+	defer func() {
+		_ = os.Remove(f.Name())
+	}()
 
 	if _, err := f.Write([]byte("{invalid: yaml: unclosed")); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err = Load(f.Name())
 	if err == nil {
