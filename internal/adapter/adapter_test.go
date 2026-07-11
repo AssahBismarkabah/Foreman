@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -244,6 +245,10 @@ func TestToolDef(t *testing.T) {
 }
 
 func TestVerify_findsOpenCode(t *testing.T) {
+	if _, err := exec.LookPath("opencode"); err != nil {
+		t.Skip("opencode not installed")
+	}
+
 	ctx := context.Background()
 	a := newTestAdapter()
 
