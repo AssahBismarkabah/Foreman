@@ -195,3 +195,246 @@ func TestCoordinatorAdapterScoping(t *testing.T) {
 		t.Error("expected claude adapter in map")
 	}
 }
+
+// --- Pipeline integration tests ---
+
+// TestFullPipeline_EventsPublishedOnBus verifies that agent.output events
+// are published on the event bus when the coordinator runs an agent.
+func TestFullPipeline_EventsPublishedOnBus(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	defer func() { _ = bus.Close() }()
+
+	cp := controlplane.New(bus)
+	hub := mcphub.NewStaticHub(nil)
+	sbox := &mockSandbox{}
+	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
+	co := New(bus, cp, sbox, hub, adapters, 5)
+
+	var agentEvents []schemas.Event
+	cancel, err := bus.Subscribe(context.Background(),
+		schemas.Subject("agent", "ses_task_events", "output"),
+		func(ctx context.Context, evt schemas.Event) error {
+			agentEvents = append(agentEvents, evt)
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer cancel()
+
+	if err := co.SubmitTask(context.Background(), "task_events", "do something"); err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	waitForStatus(t, cp, "ses_task_events", schemas.StatusCompleted, 2*time.Second)
+
+	if len(agentEvents) == 0 {
+		t.Fatal("expected at least 1 agent.output event, got 0")
+	}
+	for i, evt := range agentEvents {
+		if evt.Type != schemas.EvAgentOutput {
+			t.Errorf("event[%d]: expected type %s, got %s", i, schemas.EvAgentOutput, evt.Type)
+		}
+		if evt.SessionID != "ses_task_events" {
+			t.Errorf("event[%d]: expected sessionID 'ses_task_events', got %q", i, evt.SessionID)
+		}
+	}
+}
+
+// TestFullPipeline_NonZeroExitCode verifies that a non-zero agent exit code
+// transitions the session to FAILED.
+func TestFullPipeline_NonZeroExitCode(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	defer func() { _ = bus.Close() }()
+
+	cp := controlplane.New(bus)
+	hub := mcphub.NewStaticHub(nil)
+	sbox := &failSandbox{exitCode: 42, stderr: "agent crashed"}
+	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
+	co := New(bus, cp, sbox, hub, adapters, 5)
+
+	if err := co.SubmitTask(context.Background(), "task_fail_exit", "do something"); err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	waitForStatus(t, cp, "ses_task_fail_exit", schemas.StatusFailed, 2*time.Second)
+}
+
+// TestFullPipeline_SandboxProvisionFailure verifies that a sandbox provision
+// error transitions the session to FAILED.
+func TestFullPipeline_SandboxProvisionFailure(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	defer func() { _ = bus.Close() }()
+
+	cp := controlplane.New(bus)
+	hub := mcphub.NewStaticHub(nil)
+	sbox := &provisionFailSandbox{}
+	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
+	co := New(bus, cp, sbox, hub, adapters, 5)
+
+	if err := co.SubmitTask(context.Background(), "task_provision_fail", "do something"); err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	waitForStatus(t, cp, "ses_task_provision_fail", schemas.StatusFailed, 2*time.Second)
+}
+
+// TestFullPipeline_VerifyFailure verifies that an adapter Verify failure
+// transitions the session to FAILED.
+func TestFullPipeline_VerifyFailure(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	defer func() { _ = bus.Close() }()
+
+	cp := controlplane.New(bus)
+	hub := mcphub.NewStaticHub(nil)
+	sbox := &mockSandbox{}
+	adapters := []adapter.AgentAdapter{&verifyFailAdapter{name: "test"}}
+	co := New(bus, cp, sbox, hub, adapters, 5)
+
+	if err := co.SubmitTask(context.Background(), "task_verify_fail", "do something"); err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	waitForStatus(t, cp, "ses_task_verify_fail", schemas.StatusFailed, 2*time.Second)
+}
+
+// TestFullPipeline_MultiLineOutput verifies that multi-line stdout is parsed
+// line by line and each line produces an agent.output event.
+func TestFullPipeline_MultiLineOutput(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	defer func() { _ = bus.Close() }()
+
+	cp := controlplane.New(bus)
+	hub := mcphub.NewStaticHub(nil)
+	sbox := &multiLineSandbox{stdout: "line one\nline two\nline three\n"}
+	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
+	co := New(bus, cp, sbox, hub, adapters, 5)
+
+	var agentEvents []schemas.Event
+	cancel, err := bus.Subscribe(context.Background(),
+		schemas.Subject("agent", "ses_task_multi", "output"),
+		func(ctx context.Context, evt schemas.Event) error {
+			agentEvents = append(agentEvents, evt)
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer cancel()
+
+	if err := co.SubmitTask(context.Background(), "task_multi", "do something"); err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	waitForStatus(t, cp, "ses_task_multi", schemas.StatusCompleted, 2*time.Second)
+
+	if len(agentEvents) != 3 {
+		t.Fatalf("expected 3 agent.output events (one per line), got %d", len(agentEvents))
+	}
+}
+
+// --- Additional mock types ---
+
+// failSandbox returns a non-zero exit code from Execute.
+type failSandbox struct {
+	exitCode int
+	stderr   string
+}
+
+func (m *failSandbox) Provision(ctx context.Context, spec sandbox.SandboxSpec) (string, error) {
+	return "sandbox_fail", nil
+}
+func (m *failSandbox) Execute(ctx context.Context, sessionID string, cmd []string, timeout time.Duration) (*sandbox.ExecutionResult, error) {
+	return &sandbox.ExecutionResult{ExitCode: m.exitCode, Stdout: "", Stderr: m.stderr}, nil
+}
+func (m *failSandbox) WriteFile(ctx context.Context, sessionID, path string, content []byte) error {
+	return nil
+}
+func (m *failSandbox) ReadFile(ctx context.Context, sessionID, path string) ([]byte, error) {
+	return nil, nil
+}
+func (m *failSandbox) UploadCheckpoint(ctx context.Context, sessionID, sourceDir string) (string, error) {
+	return "cp_1", nil
+}
+func (m *failSandbox) SubscribeEvents(ctx context.Context, sessionID string) (<-chan sandbox.SandboxEvent, error) {
+	return make(chan sandbox.SandboxEvent), nil
+}
+func (m *failSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
+func (m *failSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+
+// provisionFailSandbox returns an error from Provision.
+type provisionFailSandbox struct{}
+
+func (m *provisionFailSandbox) Provision(ctx context.Context, spec sandbox.SandboxSpec) (string, error) {
+	return "", fmt.Errorf("docker daemon not available")
+}
+func (m *provisionFailSandbox) Execute(ctx context.Context, sessionID string, cmd []string, timeout time.Duration) (*sandbox.ExecutionResult, error) {
+	return &sandbox.ExecutionResult{ExitCode: 0}, nil
+}
+func (m *provisionFailSandbox) WriteFile(ctx context.Context, sessionID, path string, content []byte) error {
+	return nil
+}
+func (m *provisionFailSandbox) ReadFile(ctx context.Context, sessionID, path string) ([]byte, error) {
+	return nil, nil
+}
+func (m *provisionFailSandbox) UploadCheckpoint(ctx context.Context, sessionID, sourceDir string) (string, error) {
+	return "cp_1", nil
+}
+func (m *provisionFailSandbox) SubscribeEvents(ctx context.Context, sessionID string) (<-chan sandbox.SandboxEvent, error) {
+	return make(chan sandbox.SandboxEvent), nil
+}
+func (m *provisionFailSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
+func (m *provisionFailSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+
+// verifyFailAdapter fails when Verify is called.
+type verifyFailAdapter struct {
+	name string
+}
+
+func (v *verifyFailAdapter) Name() string            { return v.name }
+func (v *verifyFailAdapter) Meta() adapter.AgentMeta { return adapter.AgentMeta{Name: v.name} }
+func (v *verifyFailAdapter) BuildConfig(ctx context.Context, cfg adapter.BuildConfig) ([]string, error) {
+	return []string{"echo", "hello"}, nil
+}
+func (v *verifyFailAdapter) Verify(ctx context.Context) error {
+	return fmt.Errorf("binary not found")
+}
+func (v *verifyFailAdapter) StartCommand(ctx context.Context, cfg map[string]any) ([]string, error) {
+	return []string{"echo", "hello"}, nil
+}
+func (v *verifyFailAdapter) ParseEvent(ctx context.Context, line []byte) (any, error) {
+	return map[string]string{"type": "text", "text": string(line)}, nil
+}
+func (v *verifyFailAdapter) InjectPrompt(ctx context.Context, prompt string) ([]byte, error) {
+	return nil, nil
+}
+func (v *verifyFailAdapter) HeartbeatTimeout() time.Duration       { return time.Minute }
+func (v *verifyFailAdapter) CheckHealth(ctx context.Context) error { return nil }
+
+// multiLineSandbox returns multi-line stdout from Execute.
+type multiLineSandbox struct {
+	stdout string
+}
+
+func (m *multiLineSandbox) Provision(ctx context.Context, spec sandbox.SandboxSpec) (string, error) {
+	return "sandbox_multi", nil
+}
+func (m *multiLineSandbox) Execute(ctx context.Context, sessionID string, cmd []string, timeout time.Duration) (*sandbox.ExecutionResult, error) {
+	return &sandbox.ExecutionResult{ExitCode: 0, Stdout: m.stdout, Stderr: ""}, nil
+}
+func (m *multiLineSandbox) WriteFile(ctx context.Context, sessionID, path string, content []byte) error {
+	return nil
+}
+func (m *multiLineSandbox) ReadFile(ctx context.Context, sessionID, path string) ([]byte, error) {
+	return nil, nil
+}
+func (m *multiLineSandbox) UploadCheckpoint(ctx context.Context, sessionID, sourceDir string) (string, error) {
+	return "cp_1", nil
+}
+func (m *multiLineSandbox) SubscribeEvents(ctx context.Context, sessionID string) (<-chan sandbox.SandboxEvent, error) {
+	return make(chan sandbox.SandboxEvent), nil
+}
+func (m *multiLineSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
+func (m *multiLineSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
