@@ -5,29 +5,25 @@
 1. [Executive Summary](#1-executive-summary)
 2. [Architecture Overview](#2-architecture-overview)
 3. [Component Deep Dive](#3-component-deep-dive)
-4. [Data Flow: End-to-End](#4-data-flow-end-to-end)
-5. [Reliability & Recovery](#5-reliability--recovery)
-6. [Identity & Security](#6-identity--security)
-7. [Agent Abstraction Layer](#7-agent-abstraction-layer)
-8. [MCP Hub & Tool Registry](#8-mcp-hub--tool-registry)
-9. [Sandbox Architecture](#9-sandbox-architecture)
-10. [Implementation Roadmap](#10-implementation-roadmap)
+4. [Reliability & Recovery](#4-reliability--recovery)
+5. [Identity & Security](#5-identity--security)
+6. [Agent Abstraction Layer](#6-agent-abstraction-layer)
+7. [MCP Hub & Tool Registry](#7-mcp-hub--tool-registry)
+8. [Sandbox Architecture](#8-sandbox-architecture)
 
 ---
 
 ## 1. Executive Summary
 
-Foreman is a chat-native coding agent foreman -- a service that lives in your team's Slack or Discord, receives task requests in natural language, and orchestrates a fleet of specialized coding agents to execute them. It is not another AI coding agent. It is the conductor that coordinates agents across codebases, environments, and frameworks with reliable state management, approval gates, and full audit trails.
-
-**Core thesis:** The building blocks for AI-assisted development exist (coding agents, MCP tools, sandbox runtimes), but no product combines them into a reliable, team-oriented orchestration layer that is present in chat and ready to use. Foreman fills that gap.
-
-**Primary value:** Teams stop managing individual AI tool subscriptions and agent configurations. They talk to Foreman, which picks the right agent, provisions the environment, tracks every action, and reports back -- all within the team's existing chat.
+Foreman is an event-driven service that lives in Slack or Discord, receives tasks in natural language, and orchestrates coding agents to execute them with reliable state management, approval gates, and audit trails.
 
 ---
 
 ## 2. Architecture Overview
 
 ### 2.1 System Context
+
+See `docs/diagrams/system-context.puml` for the component architecture.
 
 ```plantuml
 @startuml
@@ -83,20 +79,7 @@ AdapterOpenCode --> Sandbox
 5. **Asynchronous by default.** Task submission returns immediately with a session ID. All reporting happens via events, not blocking RPC.
 6. **Sandboxed execution.** Agents never run on the Foreman host. They execute in isolated environments with resource limits.
 
-### 2.3 Key Changes from Initial Topology
 
-The initial diagram had the right bones. Here are the refinements made after analysis:
-
-| Change | Rationale |
-|--------|-----------|
-| **Merged Runtime Environment + Agent Runtime** into unified Runtime Layer | The split between "cloud provider" and "app runtime" was fuzzy and introduced unnecessary indirection. The Foreman service runs as a single process; the infrastructure provisioning is a sub-concern of the Sandbox system. |
-| **Added Event Bus** | Direct control plane-to-coordinator communication does not scale and prevents reliable recovery. NATS provides queuing, retries, and pub/sub for async task flow. |
-| **Added State Store** | Sessions, tasks, checkpoints, and agent state need durable persistence. Recovery is impossible without it. |
-| **Added Identity Provider** | The user's own content framework centers on IAM Meets AI. Every spawned agent needs a scoped, auditable identity. Missing this would be a fatal gap. |
-| **Added Approval Gate** | Teams will not trust a system that pushes code without human review. The gate must be explicit in the architecture. |
-| **Added MCP Hub** | MCP servers are the tool ecosystem. A registry and lifecycle manager is needed so agents get the right tools without hard-coding. |
-
----
 
 ## 3. Component Deep Dive
 
@@ -111,35 +94,7 @@ The main process. Long-running daemon that hosts all other components as modules
 - Health check endpoint for monitoring
 - Configuration management (hot-reload where possible)
 
-**Lifecycle:**
-```plantuml
-@startuml
-!theme plain
-skinparam backgroundColor white
-skinparam shadowing false
-skinparam defaultFontSize 12
-skinparam activity {
-  BorderColor Black
-  BackgroundColor White
-  FontColor Black
-}
-
-start
-:Init Subsystems;
-:Connect State Store;
-:Connect Event Bus;
-:Register Plugins;
-:Accept Work;
-note right #FFEAA7: Running...
-:SIGTERM;
-:Drain Agents;
-:Persist State;
-stop
-
-@enduml
-```
-
-> Source: `docs/diagrams/core-lifecycle.puml`
+**Lifecycle:** `docs/diagrams/core-lifecycle.puml`
 
 **Technology:** Go binary, single deployment artifact.
 
@@ -155,59 +110,187 @@ The brain. Manages sessions, state machines, policies, and recovery.
 - Rate limiting and concurrency caps
 - Audit log generation
 
-**Session State Machine:**
+**Session State Machine:** `docs/diagrams/session-state-machine.puml`
 
-```plantuml
-@startuml
-!theme plain
-skinparam backgroundColor white
-skinparam shadowing false
-skinparam state {
-  BackgroundColor White
-  BorderColor Black
-  FontColor Black
-}
-
-[*] --> PENDING : task received
-PENDING --> ALLOCATING : resources requested
-ALLOCATING --> RUNNING : agent started
-RUNNING --> BLOCKED : approval required
-BLOCKED --> RUNNING : approval granted
-RUNNING --> COMPLETED : task done
-RUNNING --> FAILED : error occurred
-BLOCKED --> CANCELLED : denied / timeout
-FAILED --> ALLOCATING : retry from checkpoint
-ALLOCATING --> FAILED : allocation failed
-
-@enduml
-```
-
-> Source: `docs/diagrams/session-state-machine.puml`
-
-**Recovery state:** When Foreman restarts, the Control Plane loads all non-terminal sessions from the State Store and either resumes or fails them based on their current state and staleness.
+**Recovery:** On restart, Control Plane loads all non-terminal sessions. ALLOCATING -> fail. RUNNING with recent heartbeat -> reconnect. RUNNING with stale heartbeat -> fail. BLOCKED -> re-send approval. PENDING -> re-queue.
 
 ### 3.3 Event Bus
 
 The nervous system. All async communication flows through the event bus.
 
-**Events (not exhaustive):**
-- `session.created` - new task received
-- `session.allocating` - resources being provisioned
-- `session.running` - agent started work
-- `session.blocked` - waiting for input/approval
-- `session.completed` - task finished
-- `session.failed` - task errored
-- `session.cancelled` - user or policy cancelled
-- `agent.heartbeat` - periodic liveness
-- `agent.log` - streaming log output
-- `agent.checkpoint` - state snapshot for recovery
-- `agent.crash` - agent process terminated unexpectedly
-- `infra.resource_exhausted` - out of memory/disk
-- `approval.required` - gate triggered
-- `approval.granted` - user approved
-- `approval.denied` - user rejected
+**Technology:** NATS (lightweight, embedded or clustered). Core NATS for at-most-once events (heartbeats, logs). JetStream for at-least-once delivery when needed (session events, checkpoints).
 
-**Technology:** NATS (lightweight, embedded or clustered, exactly the scale we need).
+**Serialization:** JSON over NATS. Standard Go `encoding/json` serialization of typed structs. JSON is chosen over Protobuf for simplicity, debuggability, and because we are Go-only (no cross-language schema management needed). NATS subjects use dot-notation hierarchy for routing.
+
+**NATS Subject Hierarchy:**
+
+```
+foreman.session.<action>      -- session lifecycle events
+foreman.agent.<action>        -- agent runtime events
+foreman.approval.<action>     -- approval flow events
+foreman.command.<action>      -- internal commands (Control Plane -> Coordinator)
+foreman.plugin.<name>.<event> -- plugin I/O
+```
+
+**Event Schemas:**
+
+Every event embeds standard metadata:
+
+```go
+type EventMeta struct {
+    EventID   string    `json:"event_id"`
+    SessionID string    `json:"session_id,omitempty"`
+    Source    string    `json:"source"`
+    Timestamp time.Time `json:"timestamp"`
+}
+```
+
+**Session Events** (subject: `foreman.session.<action>`):
+
+| Event | Subject | Schema | Delivery |
+|-------|---------|--------|----------|
+| Created | `foreman.session.created` | `SessionCreated` | JetStream |
+| State change | `foreman.session.state` | `SessionStateChanged` | JetStream |
+| Blocked | `foreman.session.blocked` | `SessionBlocked` | JetStream |
+| Completed | `foreman.session.completed` | `SessionCompleted` | JetStream |
+| Failed | `foreman.session.failed` | `SessionFailed` | JetStream |
+| Cancelled | `foreman.session.cancelled` | `SessionCancelled` | JetStream |
+
+```go
+type SessionCreated struct {
+    Meta    EventMeta `json:"meta"`
+    UserID  string    `json:"user_id"`
+    Plugin  string    `json:"plugin"`
+    Task    string    `json:"task"`
+    Channel string    `json:"channel,omitempty"`
+}
+
+type SessionStateChanged struct {
+    Meta     EventMeta `json:"meta"`
+    OldState string    `json:"old_state"`
+    NewState string    `json:"new_state"`
+    Reason   string    `json:"reason,omitempty"`
+}
+
+type SessionBlocked struct {
+    Meta    EventMeta `json:"meta"`
+    Reason  string    `json:"reason"`
+    Policy  string    `json:"policy,omitempty"`
+    Summary string    `json:"summary"`
+    Diff    string    `json:"diff,omitempty"`
+}
+
+type SessionCompleted struct {
+    Meta     EventMeta `json:"meta"`
+    Result   string    `json:"result"`
+    Summary  string    `json:"summary"`
+    Duration string    `json:"duration"`
+}
+
+type SessionFailed struct {
+    Meta    EventMeta `json:"meta"`
+    Error   string    `json:"error"`
+    Attempt int       `json:"attempt"`
+}
+
+type SessionCancelled struct {
+    Meta   EventMeta `json:"meta"`
+    Reason string    `json:"reason"`
+}
+```
+
+**Agent Events** (subject: `foreman.agent.<action>`):
+
+| Event | Subject | Schema | Delivery |
+|-------|---------|--------|----------|
+| Heartbeat | `foreman.agent.heartbeat` | `AgentHeartbeat` | Core NATS |
+| Log | `foreman.agent.log` | `AgentLog` | Core NATS |
+| Checkpoint | `foreman.agent.checkpoint` | `AgentCheckpoint` | JetStream |
+| Crash | `foreman.agent.crash` | `AgentCrash` | JetStream |
+
+```go
+type AgentHeartbeat struct {
+    Meta         EventMeta `json:"meta"`
+    AgentID      string    `json:"agent_id"`
+    SandboxID    string    `json:"sandbox_id"`
+    CPUUsage     float64   `json:"cpu_usage,omitempty"`
+    MemoryUsage  float64   `json:"memory_usage,omitempty"`
+}
+
+type AgentLog struct {
+    Meta    EventMeta `json:"meta"`
+    AgentID string    `json:"agent_id"`
+    Stream  string    `json:"stream"` // stdout, stderr
+    Line    string    `json:"line"`
+}
+
+type AgentCheckpoint struct {
+    Meta     EventMeta       `json:"meta"`
+    AgentID  string          `json:"agent_id"`
+    Snapshot json.RawMessage `json:"snapshot"`
+    Step     string          `json:"step,omitempty"`
+}
+
+type AgentCrash struct {
+    Meta      EventMeta `json:"meta"`
+    AgentID   string    `json:"agent_id"`
+    Signal    string    `json:"signal,omitempty"`
+    ExitCode  int       `json:"exit_code"`
+    LogTail   string    `json:"log_tail,omitempty"`
+}
+```
+
+**Approval Events** (subject: `foreman.approval.<action>`):
+
+| Event | Subject | Schema | Delivery |
+|-------|---------|--------|----------|
+| Required | `foreman.approval.required` | `ApprovalRequired` | JetStream |
+| Granted | `foreman.approval.granted` | `ApprovalResponse` | JetStream |
+| Denied | `foreman.approval.denied` | `ApprovalResponse` | JetStream |
+
+```go
+type ApprovalRequired struct {
+    Meta      EventMeta `json:"meta"`
+    Policy    string    `json:"policy"`
+    Action    string    `json:"action"`
+    Target    string    `json:"target"`
+    Summary   string    `json:"summary"`
+    Diff      string    `json:"diff,omitempty"`
+    Approvers []string  `json:"approvers"`
+    Timeout   int       `json:"timeout"` // seconds
+}
+
+type ApprovalResponse struct {
+    Meta      EventMeta `json:"meta"`
+    Approved  bool      `json:"approved"`
+    Responder string    `json:"responder"`
+    Reason    string    `json:"reason,omitempty"`
+}
+```
+
+**Internal Commands** (subject: `foreman.command.<action>`):
+
+| Event | Subject | Schema | Delivery |
+|-------|---------|--------|----------|
+| Allocate | `foreman.command.allocate` | `AllocateCommand` | JetStream |
+| Teardown | `foreman.command.teardown` | `TeardownCommand` | JetStream |
+
+```go
+type AllocateCommand struct {
+    Meta        EventMeta     `json:"meta"`
+    AgentType   string        `json:"agent_type"`
+    TaskSpec    json.RawMessage `json:"task_spec"`
+    SandboxType string        `json:"sandbox_type"`
+    Tools       []string      `json:"tools"`
+}
+
+type TeardownCommand struct {
+    Meta      EventMeta `json:"meta"`
+    AgentID   string    `json:"agent_id"`
+    Reason    string    `json:"reason"`
+    Force     bool      `json:"force"`
+}
+```
 
 ### 3.4 State Store
 
@@ -252,29 +335,7 @@ The hands. Spawns, monitors, and tears down agent instances.
 
 The translator. Each supported agent framework gets an adapter that implements a common interface.
 
-**Adapter Interface:**
-
-```go
-type AgentAdapter interface {
-    // Name returns the agent identifier (e.g., "claude-code", "codex")
-    Name() string
-
-    // BuildConfig generates the runtime configuration for this agent
-    BuildConfig(task TaskSpec, tools []MCPTool) (AgentConfig, error)
-
-    // Verify checks if the agent runtime is available in the sandbox
-    Verify(sandbox Sandbox) error
-
-    // StartCommand returns the command to launch the agent
-    StartCommand(config AgentConfig) []string
-
-    // ParseOutput translates agent output into structured events
-    ParseOutput(line string) (*AgentEvent, error)
-
-    // Supports reports whether this adapter handles the given task
-    Supports(task TaskSpec) bool
-}
-```
+**Adapter Interface:** See [Section 6.2](#62-adapter-interface-detailed) for the full canonical `AgentAdapter` interface definition. It covers metadata, lifecycle (BuildConfig, Verify, StartCommand), communication (ParseEvent, InjectPrompt), and health (HeartbeatTimeout, CheckHealth).
 
 **Adapters to build:**
 - **OpenCode adapter** - connects to opencode, feeds MCP tools, parses structured output
@@ -287,11 +348,45 @@ type AgentAdapter interface {
 
 The face of the system in the team's chat.
 
+**Plugin Interface:**
+
+Each communication platform implements this interface to connect to Foreman:
+
+```go
+type Plugin interface {
+    // Identity
+    Name() string
+    Version() string
+
+    // Lifecycle
+    Start(ctx context.Context, bus EventBus) error
+    Stop(ctx context.Context) error
+
+    // Outbound messages
+    SendMessage(ctx context.Context, channel string, msg Message) error
+    SendBlockMessage(ctx context.Context, channel string, blocks []Block) error
+}
+```
+
+Each plugin publishes `UserMessage` events via the Event Bus on subject `foreman.plugin.<name>.message` for the Control Plane to consume:
+
+```go
+type UserMessage struct {
+    Meta      EventMeta `json:"meta"`
+    Plugin    string    `json:"plugin"`     // "slack", "discord"
+    UserID    string    `json:"user_id"`
+    Channel   string    `json:"channel"`
+    Text      string    `json:"text"`
+    ThreadTS  string    `json:"thread_ts,omitempty"`
+    Raw       []byte    `json:"raw,omitempty"` // platform-specific original payload
+}
+```
+
 **Responsibilities:**
 - Receive natural language input from users
 - Parse commands and context
-- Forward structured tasks to the Control Plane
-- Report progress, approvals, and results back to channels
+- Publish UserMessage to Event Bus for Control Plane
+- Subscribe to session events and report progress, approvals, results
 - Support interactive patterns (thread replies, modals, buttons)
 
 **Slack Plugin:**
@@ -299,6 +394,7 @@ The face of the system in the team's chat.
 - App mentions (`@Foreman deploy the staging branch`)
 - Interactive components (approve/deny buttons)
 - Thread replies for long-running task updates
+- Uses Slack Socket Mode (no public endpoint needed)
 
 **Discord Plugin:**
 - Slash commands
@@ -336,140 +432,11 @@ policies:
     timeout: 300  # auto-deny after 5 minutes
 ```
 
----
 
-## 4. Data Flow: End-to-End
 
-### 4.1 Typical Task Flow
+## 4. Reliability & Recovery
 
-```plantuml
-@startuml
-!theme plain
-skinparam backgroundColor white
-skinparam shadowing false
-
-actor User as User
-participant "Foreman" as Foreman
-participant "Agent Coordinator" as Coordinator
-participant "Sandbox + Agent" as Agent
-
-User -> Foreman: /foreman add pagination to users endpoint
-activate Foreman
-
-Foreman -> Foreman: session.created
-Foreman -> Foreman: evaluate policies
-Foreman -> Foreman: select agent type
-
-Foreman -> Coordinator: allocate command
-activate Coordinator
-
-Coordinator -> Agent: provision sandbox
-activate Agent
-
-Agent --> Coordinator: sandbox ready
-Coordinator -> Agent: call adapter start
-Coordinator --> Foreman: session.running
-
-Agent -> Agent: agent working\nMCP: git, file ops, tests
-
-Agent -> Foreman: agent.checkpoint\n"reading the code..."
-Foreman -> User: Task update: "reading the code..."
-
-Agent -> Foreman: agent.checkpoint\n"implementing..."
-Foreman -> User: Task update: "implementing..."
-
-Agent -> Agent: creates PR
-Agent -> Foreman: approval.required
-Foreman -> User: [Approve] [Deny]
-
-User -> Foreman: clicks Approve
-Foreman -> Coordinator: approval.granted
-Foreman -> Foreman: session.completed
-
-Coordinator -> Agent: teardown sandbox
-deactivate Agent
-deactivate Coordinator
-
-Foreman -> User: PR #143 created:\n"Added pagination..."
-deactivate Foreman
-
-@enduml
-```
-
-> Source: `docs/diagrams/typical-task-flow.puml`
-
-### 4.2 Recovery Flow (Foreman Restart)
-
-```plantuml
-@startuml
-!theme plain
-skinparam backgroundColor white
-skinparam shadowing false
-
-start
-:Foreman starts up;
-:Load all non-terminal sessions\nfrom State Store;
-
-repeat
-  :Inspect session state;
-  if (state = ALLOCATING?) then (yes)
-    :Mark FAILED\n(allocation incomplete);
-  elseif (state = RUNNING?) then (yes)
-    :Check agent heartbeat age;
-    if (heartbeat < 30s?) then (yes)
-      :Attempt reconnect;
-    else (no)
-      :Mark FAILED\nlog crash;
-    endif
-  elseif (state = BLOCKED?) then (yes)
-    :Re-send approval request;
-  elseif (state = PENDING?) then (yes)
-    :Re-queue to Event Bus;
-  endif
-repeat while (more sessions?) is (yes)
--> no;
-stop
-
-@enduml
-```
-
-> Source: `docs/diagrams/recovery-foreman-restart.puml`
-
-### 4.3 Agent Crash Recovery
-
-```plantuml
-@startuml
-!theme plain
-skinparam backgroundColor white
-skinparam shadowing false
-
-start
-:Coordinator detects\nmissing heartbeat (30s timeout);
-:Send SIGTERM (graceful),\nwait 10s;
-:Send SIGKILL if still alive;
-:Retrieve last checkpoint\nfrom State Store;
-
-if (attempts < max_retries?)\n(default: 3) then (yes)
-  :Provision fresh sandbox;
-  :Inject checkpoint state;
-  :Restart agent from checkpoint;
-  :Report session.running;
-else (no)
-  :Report session.failed\nwith crash reason\nand log tail;
-endif
-
-stop
-
-@enduml
-```
-
-> Source: `docs/diagrams/agent-crash-recovery.puml`
-
----
-
-## 5. Reliability & Recovery
-
-### 5.1 Crash Domains
+### 4.1 Crash Domains
 
 Each component fails independently. A crash in one domain should not cascade.
 
@@ -483,7 +450,7 @@ Each component fails independently. A crash in one domain should not cascade.
 | Sandbox | OOM / OODisk | Agent killed | Retry with larger resources or fail |
 | Communication Plugin | Connection drop | User sees stale UI | Reconnect, re-sync session state on reconnect |
 
-### 5.2 Checkpoint System
+### 4.2 Checkpoint System
 
 Each agent periodically emits checkpoints that capture:
 - Current task context (files modified, branch state)
@@ -497,7 +464,7 @@ Each agent periodically emits checkpoints that capture:
 
 **Restore:** On recovery, the new agent receives the last checkpoint and replays from that state. Idempotency is the agent's responsibility (the checkpoints are best-effort snapshots).
 
-### 5.3 Graceful Shutdown
+### 4.3 Graceful Shutdown
 
 On SIGTERM:
 1. Control Plane stops accepting new tasks
@@ -513,9 +480,9 @@ Timeout: 30s total. After that, heavy SIGKILL.
 
 ---
 
-## 6. Identity & Security
+## 5. Identity & Security
 
-### 6.1 Identity Model
+### 5.1 Identity Model
 
 Every entity in the system has an identity:
 
@@ -526,7 +493,7 @@ Every entity in the system has an identity:
 | Agent Instance | Scoped OAuth2 token | Identity Provider | Specific repo + branch + actions |
 | Foreman Admin | API key | Configuration | Management API |
 
-### 6.2 Agent Token Scoping
+### 5.2 Agent Token Scoping
 
 When an agent is spawned, it receives a time-limited token scoped to exactly what it needs:
 
@@ -549,7 +516,7 @@ When an agent is spawned, it receives a time-limited token scoped to exactly wha
 
 The GitHub App or GitLab App associated with Foreman validates this scope before allowing any action.
 
-### 6.3 Audit Trail
+### 5.3 Audit Trail
 
 Every action is logged:
 - Who requested the task (user identity)
@@ -561,7 +528,7 @@ Every action is logged:
 
 Audit logs are immutable (append-only in the State Store) and retained per organizational policy.
 
-### 6.4 Sandbox Security
+### 5.4 Sandbox Security
 
 - Agents never have network access to the Foreman host
 - Network egress limited to: git remote, MCP servers, Foreman API
@@ -572,9 +539,9 @@ Audit logs are immutable (append-only in the State Store) and retained per organ
 
 ---
 
-## 7. Agent Abstraction Layer
+## 6. Agent Abstraction Layer
 
-### 7.1 Why an Abstraction Layer
+### 6.1 Why an Abstraction Layer
 
 Different agent frameworks have:
 - Different CLI interfaces (flags, stdin protocols, output formats)
@@ -584,7 +551,7 @@ Different agent frameworks have:
 
 The adapter layer normalizes these differences so the Control Plane does not need to know which agent it is talking to.
 
-### 7.2 Adapter Interface (Detailed)
+### 6.2 Adapter Interface (Detailed)
 
 ```go
 type AgentAdapter interface {
@@ -617,7 +584,7 @@ type AgentAdapter interface {
 }
 ```
 
-### 7.3 Agent Capability Model
+### 6.3 Agent Capability Model
 
 Each agent declares what it can do:
 
@@ -641,7 +608,7 @@ const (
 
 The Control Plane uses this to match tasks to agents: if a task requires `pr.create` and the agent doesn't support it, the system either selects a different agent or rejects the task early.
 
-### 7.4 Example: Claude Code Adapter
+### 6.4 Example: Claude Code Adapter
 
 Claude Code runs as a terminal process. The adapter:
 1. Verifies `claude` binary is in the sandbox PATH
@@ -651,7 +618,7 @@ Claude Code runs as a terminal process. The adapter:
 5. Maps Claude's tool calls to the Foreman tool model
 6. Claude's built-in MCP support is used directly
 
-### 7.5 Example: OpenCode Adapter
+### 6.5 Example: OpenCode Adapter
 
 OpenCode runs as a service with its own MCP endpoint. The adapter:
 1. Verifies the opencode binary is available
@@ -662,13 +629,13 @@ OpenCode runs as a service with its own MCP endpoint. The adapter:
 
 ---
 
-## 8. MCP Hub & Tool Registry
+## 7. MCP Hub & Tool Registry
 
-### 8.1 Purpose
+### 7.1 Purpose
 
 The Model Context Protocol is how agents get access to tools (git, filesystem, search, etc.). The MCP Hub manages which tools are available and binds them to agents at spawn time.
 
-### 8.2 Tool Registry
+### 7.2 Tool Registry
 
 Static registry of available MCP servers:
 
@@ -693,7 +660,7 @@ mcp_servers:
     capabilities: [CapTestRun]
 ```
 
-### 8.3 Dynamic Binding
+### 7.3 Dynamic Binding
 
 When an agent is spawned:
 1. Control Plane determines required capabilities from the task spec
@@ -701,7 +668,7 @@ When an agent is spawned:
 3. Coordinator provisions the sandbox with those MCP servers running alongside the agent
 4. Agent discovers the MCP servers via the MCP protocol (stdio or SSE)
 
-### 8.4 MCP Server Lifecycle
+### 7.4 MCP Server Lifecycle
 
 Managed by the Agent Coordinator within each sandbox:
 - **Start:** Before the agent launches, start the required MCP servers
@@ -712,9 +679,9 @@ Managed by the Agent Coordinator within each sandbox:
 
 ---
 
-## 9. Sandbox Architecture
+## 8. Sandbox Architecture
 
-### 9.1 Sandbox Abstraction
+### 8.1 Sandbox Abstraction
 
 The sandbox is where agents execute. It must be isolated, disposable, and resource-constrained.
 
@@ -731,7 +698,7 @@ type Sandbox interface {
 }
 ```
 
-### 9.2 Sandbox Types
+### 8.2 Sandbox Types
 
 | Type | Use Case | Provision Time | Cost | Isolation |
 |------|----------|---------------|------|-----------|
@@ -740,7 +707,7 @@ type Sandbox interface {
 | **AWS EC2/ECS** | Production, high concurrency, GPUs | 30-120s | Cloud compute | Full VM |
 | **Kubernetes Pod** | Org-scale, existing infra | 5-15s | Cluster resources | Container + network policy |
 
-### 9.3 Resource Limits
+### 8.3 Resource Limits
 
 ```yaml
 sandbox_defaults:
@@ -760,7 +727,7 @@ sandbox_overrides:
     network: "outbound-only"
 ```
 
-### 9.4 Workspace Layout
+### 8.4 Workspace Layout
 
 ```
 /workspace/
@@ -779,80 +746,6 @@ sandbox_overrides:
     filesystem.sock
     github.sock
 ```
-
----
-
-## 10. Implementation Roadmap
-
-### Phase 0: Foundation (Week 1-2)
-
-Goal: Get the core daemon running with a single agent type and local Docker sandbox.
-
-- [ ] Go project scaffold (module structure, build, CI)
-- [ ] Core Service skeleton (config, startup, shutdown, health)
-- [ ] State Store schema + PostgreSQL connection
-- [ ] Event Bus (NATS) integration
-- [ ] Control Plane with session state machine
-- [ ] Agent Coordinator with local Docker sandbox provisioning
-- [ ] One Agent Adapter (OpenCode, as the first target)
-- [ ] MCP Hub with filesystem and git tools
-- [ ] Session recovery on restart (happy path)
-
-**Validation checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back.
-
-### Phase 1: Communication & Trust (Week 3-4)
-
-Goal: Real chat interaction, approval gates, and identity.
-
-- [ ] Slack Plugin (slash commands, thread updates, buttons)
-- [ ] Discord Plugin (slash commands, thread updates)
-- [ ] Approval Gate with policy engine
-- [ ] Identity Provider + GitHub/GitLab App integration
-- [ ] Scoped agent tokens
-- [ ] Audit trail persistence
-- [ ] Approval/deny flow through chat
-
-**Validation checkpoint:** User writes `/foreman fix this bug` in Slack, agent fixes it, creates PR, user approves via button in Slack, PR is created.
-
-### Phase 2: Reliability (Week 5-6)
-
-Goal: Handle failures gracefully. Survive crashes. Retry smartly.
-
-- [ ] Checkpoint system (periodic state snapshots)
-- [ ] Agent crash detection + retry from checkpoint
-- [ ] Foreman crash recovery (reload in-flight sessions)
-- [ ] Retry policies with exponential backoff
-- [ ] Resource monitoring (CPU/memory/disk alerts)
-- [ ] Graceful shutdown with drain
-- [ ] Integration tests for failure scenarios
-
-**Validation checkpoint:** Kill the Foreman mid-task, restart, verify the agent resumes from checkpoint. Kill the agent container, verify it gets restarted.
-
-### Phase 3: Scale & Variety (Week 7-8)
-
-Goal: Multiple sandbox types, multiple agent frameworks.
-
-- [ ] Daytona sandbox provider
-- [ ] AWS/ECS sandbox provider
-- [ ] Claude Code adapter
-- [ ] Codex adapter
-- [ ] Agent capability matching (pick the right agent for the job)
-- [ ] Task routing (split complex tasks into sub-tasks)
-- [ ] Concurrency limits and queuing
-
-**Validation checkpoint:** Three agents running simultaneously in different sandboxes, each using a different agent framework, all reporting to the same Slack channel.
-
-### Phase 4: Production Polish (Week 9-10)
-
-Goal: Operable, documented, ready for real use.
-
-- [ ] Monitoring & metrics (Prometheus + Grafana)
-- [ ] Structured logging (JSON, levels, correlation IDs)
-- [ ] Rate limiting per user/team/org
-- [ ] Admin API (list sessions, cancel tasks, view logs)
-- [ ] Configuration documentation
-- [ ] Onboarding documentation
-- [ ] Deployment guide (Docker Compose, Kubernetes)
 
 ---
 

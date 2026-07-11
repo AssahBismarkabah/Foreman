@@ -100,3 +100,10 @@ Tasks that fall outside the phase structure but are already done.
 - [X] PlantUML diagrams (docs/diagrams/)
 - [X] Project README (README.md)
 - [X] Project tracker (TODO.md)
+- [X] API & landscape review (docs/api-review.md)
+- [X] Hermes Agent research and assessment
+- [X] Event message schemas defined (20+ typed Go structs)
+- [X] Plugin interface defined (Name, Version, Start, Stop, SendMessage, SendBlockMessage)
+- [X] AgentAdapter interface consolidated (section 3.6 -> 7.2 canonical)
+- [X] Event serialization decided (JSON over NATS, with rationale)
+- [X] NATS subject hierarchy designed (foreman.session/agent/approval/command/plugin.*)
