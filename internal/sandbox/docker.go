@@ -71,7 +71,10 @@ func (d *DockerSandbox) Provision(ctx context.Context, spec SandboxSpec) (string
 			return "", fmt.Errorf("docker create workdir: %w\noutput: %s", initErr, strings.TrimSpace(string(initOut)))
 		}
 	}
-	args = append(args, img, containerKeepAlive)
+	// Split keep-alive command into separate args (Docker exec doesn't use a shell)
+	keepAliveArgs := strings.Fields(containerKeepAlive)
+	args = append(args, img)
+	args = append(args, keepAliveArgs...)
 
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {

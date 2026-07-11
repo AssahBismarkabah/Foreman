@@ -15,10 +15,10 @@ Goal: Core daemon running with a single agent type and local Docker sandbox.
 - [X] Core Service skeleton (config, startup, shutdown, health)
 - [X] Config file parsing (foreman.yaml)
 - [ ] State Store schema + PostgreSQL connection
-- [ ] Event Bus (NATS) integration
+- [X] Event Bus (NATS + Memory with wildcards) integration
 - [X] Control Plane with session state machine
-- [X] Agent Coordinator with local Docker sandbox provisioning
-- [X] One Agent Adapter (OpenCode, as the first target)
+- [X] Agent Coordinator with real Docker sandbox provisioning
+- [X] One Agent Adapter (OpenCode with JSONL parsing)
 - [X] MCP Hub with filesystem and git tools
 - [X] Foreman CLI (serve + task subcommands)
 - [ ] Session recovery on restart (happy path)
@@ -107,3 +107,7 @@ Tasks that fall outside the phase structure but are already done.
 - [X] AgentAdapter interface consolidated (section 3.6 -> 7.2 canonical)
 - [X] Event serialization decided (JSON over NATS, with rationale)
 - [X] NATS subject hierarchy designed (foreman.session/agent/approval/command/plugin.*)
+- [X] Docker sandbox: provision, exec, file ops, heartbeat, logs, destroy
+- [X] MemoryBus wildcard matching (NATS-style * and > patterns)
+- [X] Coordinator wired to adapter + sandbox + MCP hub
+- [X] 51 tests total (41 unit + 5 NATS integration + 5 Docker integration)
