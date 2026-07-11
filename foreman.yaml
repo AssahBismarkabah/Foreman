@@ -1,12 +1,19 @@
 subsystems:
+  # eventbus kind: "memory" (in-process, no deps) or "nats" (JetStream)
+  #   nats without url = embedded NATS server (dev)
+  #   nats with url = external NATS cluster (prod)
   eventbus:
     kind: memory
+    # url: nats://localhost:4222
+
   sandbox:
     kind: docker
     image: ubuntu:22.04
+
   coordinator:
     max_concurrent: 5
     default_timeout: 5m
+
   agents:
     - name: opencode
       kind: opencode
@@ -14,6 +21,7 @@ subsystems:
       cwd: /tmp/opencode-workspace
       heartbeat_interval: 30s
       heartbeat_timeout: 90s
+
   mcphub:
     servers:
       - name: filesystem

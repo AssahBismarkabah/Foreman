@@ -66,3 +66,26 @@ type ToolCallPayload struct {
 	Args      any    `json:"args"`
 	SessionID string `json:"session_id"`
 }
+
+// SessionStatus tracks the lifecycle state of a session.
+type SessionStatus string
+
+const (
+	StatusCreated    SessionStatus = "CREATED"
+	StatusAllocating SessionStatus = "ALLOCATING"
+	StatusRunning    SessionStatus = "RUNNING"
+	StatusApproval   SessionStatus = "APPROVAL"
+	StatusCancelling SessionStatus = "CANCELLING"
+	StatusCompleted  SessionStatus = "COMPLETED"
+	StatusFailed     SessionStatus = "FAILED"
+)
+
+// SandboxStatus tracks the lifecycle state of a sandbox.
+type SandboxStatus string
+
+const (
+	SandboxProvisioning SandboxStatus = "provisioning"
+	SandboxRunning      SandboxStatus = "running"
+	SandboxStopped      SandboxStatus = "stopped"
+	SandboxFailed       SandboxStatus = "failed"
+)

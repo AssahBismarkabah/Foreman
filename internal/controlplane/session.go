@@ -10,29 +10,17 @@ import (
 	"github.com/foreman/foreman/internal/schemas"
 )
 
-type SessionStatus string
-
-const (
-	StatusCreated    SessionStatus = "CREATED"
-	StatusAllocating SessionStatus = "ALLOCATING"
-	StatusRunning    SessionStatus = "RUNNING"
-	StatusApproval   SessionStatus = "APPROVAL"
-	StatusCancelling SessionStatus = "CANCELLING"
-	StatusCompleted  SessionStatus = "COMPLETED"
-	StatusFailed     SessionStatus = "FAILED"
-)
-
-var validTransitions = map[SessionStatus][]SessionStatus{
-	StatusCreated:    {StatusAllocating, StatusFailed},
-	StatusAllocating: {StatusRunning, StatusFailed},
-	StatusRunning:    {StatusApproval, StatusCompleted, StatusCancelling, StatusFailed},
-	StatusApproval:   {StatusRunning, StatusCancelling, StatusFailed},
-	StatusCancelling: {StatusFailed, StatusCompleted},
+var validTransitions = map[schemas.SessionStatus][]schemas.SessionStatus{
+	schemas.StatusCreated:    {schemas.StatusAllocating, schemas.StatusFailed},
+	schemas.StatusAllocating: {schemas.StatusRunning, schemas.StatusFailed},
+	schemas.StatusRunning:    {schemas.StatusApproval, schemas.StatusCompleted, schemas.StatusCancelling, schemas.StatusFailed},
+	schemas.StatusApproval:   {schemas.StatusRunning, schemas.StatusCancelling, schemas.StatusFailed},
+	schemas.StatusCancelling: {schemas.StatusFailed, schemas.StatusCompleted},
 }
 
 type Session struct {
 	ID        string
-	Status    SessionStatus
+	Status    schemas.SessionStatus
 	TaskID    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -55,7 +43,7 @@ func New(bus eventbus.EventBus) *ControlPlane {
 func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID string) error {
 	s := &Session{
 		ID:        sessionID,
-		Status:    StatusCreated,
+		Status:    schemas.StatusCreated,
 		TaskID:    taskID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -66,7 +54,7 @@ func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID str
 	return cp.emit(ctx, s, schemas.EvSessionCreated)
 }
 
-func (cp *ControlPlane) Transition(ctx context.Context, sessionID string, to SessionStatus) error {
+func (cp *ControlPlane) Transition(ctx context.Context, sessionID string, to schemas.SessionStatus) error {
 	cp.mu.Lock()
 	s, ok := cp.sessions[sessionID]
 	cp.mu.Unlock()
@@ -96,17 +84,17 @@ func (cp *ControlPlane) Transition(ctx context.Context, sessionID string, to Ses
 
 	var evtType schemas.EventType
 	switch to {
-	case StatusAllocating:
+	case schemas.StatusAllocating:
 		evtType = schemas.EvSessionAllocating
-	case StatusRunning:
+	case schemas.StatusRunning:
 		evtType = schemas.EvSessionRunning
-	case StatusApproval:
+	case schemas.StatusApproval:
 		evtType = schemas.EvSessionApproval
-	case StatusCancelling:
+	case schemas.StatusCancelling:
 		evtType = schemas.EvSessionCancelling
-	case StatusCompleted:
+	case schemas.StatusCompleted:
 		evtType = schemas.EvSessionCompleted
-	case StatusFailed:
+	case schemas.StatusFailed:
 		evtType = schemas.EvSessionFailed
 	default:
 		return fmt.Errorf("unknown status: %s", to)

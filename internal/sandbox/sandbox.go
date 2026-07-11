@@ -3,15 +3,19 @@ package sandbox
 import (
 	"context"
 	"time"
+
+	"github.com/foreman/foreman/internal/schemas"
 )
 
-type SandboxStatus string
+// SandboxStatus is now defined in schemas package.
+// Deprecated: use schemas.SandboxStatus / schemas.Sandbox*
+type SandboxStatus = schemas.SandboxStatus
 
 const (
-	StatusProvisioning SandboxStatus = "provisioning"
-	StatusRunning      SandboxStatus = "running"
-	StatusStopped      SandboxStatus = "stopped"
-	StatusFailed       SandboxStatus = "failed"
+	StatusProvisioning = schemas.SandboxProvisioning
+	StatusRunning      = schemas.SandboxRunning
+	StatusStopped      = schemas.SandboxStopped
+	StatusFailed       = schemas.SandboxFailed
 )
 
 type ExecutionResult struct {

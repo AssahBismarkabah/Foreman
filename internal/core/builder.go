@@ -22,11 +22,18 @@ type App struct {
 	Coordinator  *coordinator.Coordinator
 }
 
-func Bootstrap(ctx context.Context, cfg *config.Config) (*App, error) {
-	bus, err := newEventBus(cfg)
+func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
+	bus, err := newEventBus(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("eventbus: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			if cerr := bus.Close(); cerr != nil {
+				log.Printf("bootstrap: close eventbus: %v", cerr)
+			}
+		}
+	}()
 
 	sbox, err := newSandbox(cfg)
 	if err != nil {
@@ -49,12 +56,15 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (*App, error) {
 	}, nil
 }
 
-func newEventBus(cfg *config.Config) (eventbus.EventBus, error) {
+func newEventBus(ctx context.Context, cfg *config.Config) (eventbus.EventBus, error) {
 	switch cfg.Subsystems.EventBus.Kind {
 	case "memory", "":
 		return eventbus.NewMemoryBus(), nil
 	case "nats":
-		return nil, fmt.Errorf("nats eventbus not yet implemented")
+		if cfg.Subsystems.EventBus.URL != "" {
+			return eventbus.NewNATSBus(ctx, cfg.Subsystems.EventBus.URL)
+		}
+		return eventbus.NewEmbeddedNATSBus(ctx)
 	default:
 		return nil, fmt.Errorf("unknown eventbus kind: %s", cfg.Subsystems.EventBus.Kind)
 	}

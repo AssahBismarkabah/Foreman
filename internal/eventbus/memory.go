@@ -33,17 +33,15 @@ func (b *MemoryBus) Publish(ctx context.Context, subject string, evt schemas.Eve
 
 func (b *MemoryBus) Subscribe(ctx context.Context, subject string, handler EventHandler) (func(), error) {
 	b.mu.Lock()
+	id := len(b.subs[subject])
 	b.subs[subject] = append(b.subs[subject], handler)
 	b.mu.Unlock()
 	return func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		handlers := b.subs[subject]
-		for i, h := range handlers {
-			if &h == &handler {
-				b.subs[subject] = append(handlers[:i], handlers[i+1:]...)
-				break
-			}
+		if id < len(handlers) {
+			b.subs[subject] = append(handlers[:id], handlers[id+1:]...)
 		}
 	}, nil
 }

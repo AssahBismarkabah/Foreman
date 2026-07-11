@@ -67,16 +67,18 @@ func (c *Coordinator) startTask(ctx context.Context, sessionID, description stri
 	}
 	c.mu.Unlock()
 
-	if err := c.cp.Transition(ctx, sessionID, controlplane.StatusAllocating); err != nil {
+	if err := c.cp.Transition(ctx, sessionID, schemas.StatusAllocating); err != nil {
 		return fmt.Errorf("transition to allocating: %w", err)
 	}
 
 	if _, err := c.mcpHub.ResolveTools(ctx, sessionID); err != nil {
-		c.cp.Transition(ctx, sessionID, controlplane.StatusFailed)
+		if tErr := c.cp.Transition(ctx, sessionID, schemas.StatusFailed); tErr != nil {
+			log.Printf("coordinator: failed to mark session %s as failed: %v", sessionID, tErr)
+		}
 		return fmt.Errorf("resolve tools: %w", err)
 	}
 
-	if err := c.cp.Transition(ctx, sessionID, controlplane.StatusRunning); err != nil {
+	if err := c.cp.Transition(ctx, sessionID, schemas.StatusRunning); err != nil {
 		return fmt.Errorf("transition to running: %w", err)
 	}
 
@@ -92,7 +94,7 @@ func (c *Coordinator) startTask(ctx context.Context, sessionID, description stri
 			c.mu.Unlock()
 		}()
 		<-runCtx.Done()
-		c.cp.Transition(ctx, sessionID, controlplane.StatusCompleted)
+		c.cp.Transition(ctx, sessionID, schemas.StatusCompleted)
 	}()
 
 	return nil
