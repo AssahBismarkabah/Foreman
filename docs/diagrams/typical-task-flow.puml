@@ -1,0 +1,51 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam shadowing false
+
+actor User as User
+participant "Foreman" as Foreman
+participant "Agent Coordinator" as Coordinator
+participant "Sandbox + Agent" as Agent
+
+User -> Foreman: /foreman add pagination to users endpoint
+activate Foreman
+
+Foreman -> Foreman: session.created
+Foreman -> Foreman: evaluate policies
+Foreman -> Foreman: select agent type
+
+Foreman -> Coordinator: allocate command
+activate Coordinator
+
+Coordinator -> Agent: provision sandbox
+activate Agent
+
+Agent --> Coordinator: sandbox ready
+Coordinator -> Agent: call adapter start
+Coordinator --> Foreman: session.running
+
+Agent -> Agent: agent working\nMCP: git, file ops, tests
+
+Agent -> Foreman: agent.checkpoint\n"reading the code..."
+Foreman -> User: Task update: "reading the code..."
+
+Agent -> Foreman: agent.checkpoint\n"implementing..."
+Foreman -> User: Task update: "implementing..."
+
+Agent -> Agent: creates PR
+Agent -> Foreman: approval.required
+Foreman -> User: [Approve] [Deny]
+
+User -> Foreman: clicks Approve
+Foreman -> Coordinator: approval.granted
+Foreman -> Foreman: session.completed
+
+Coordinator -> Agent: teardown sandbox
+deactivate Agent
+deactivate Coordinator
+
+Foreman -> User: PR #143 created:\n"Added pagination..."
+deactivate Foreman
+
+@enduml

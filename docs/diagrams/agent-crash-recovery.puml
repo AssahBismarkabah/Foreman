@@ -1,0 +1,23 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam shadowing false
+
+start
+:Coordinator detects\nmissing heartbeat (30s timeout);
+:Send SIGTERM (graceful),\nwait 10s;
+:Send SIGKILL if still alive;
+:Retrieve last checkpoint\nfrom State Store;
+
+if (attempts < max_retries?)\n(default: 3) then (yes)
+  :Provision fresh sandbox;
+  :Inject checkpoint state;
+  :Restart agent from checkpoint;
+  :Report session.running;
+else (no)
+  :Report session.failed\nwith crash reason\nand log tail;
+endif
+
+stop
+
+@enduml

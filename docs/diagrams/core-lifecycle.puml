@@ -1,0 +1,24 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontSize 12
+skinparam activity {
+  BorderColor Black
+  BackgroundColor White
+  FontColor Black
+}
+
+start
+:Init Subsystems;
+:Connect State Store;
+:Connect Event Bus;
+:Register Plugins;
+:Accept Work;
+note right #FFEAA7: Running...
+:SIGTERM;
+:Drain Agents;
+:Persist State;
+stop
+
+@enduml

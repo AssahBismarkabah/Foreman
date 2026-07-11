@@ -1,0 +1,30 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam shadowing false
+
+start
+:Foreman starts up;
+:Load all non-terminal sessions\nfrom State Store;
+
+repeat
+  :Inspect session state;
+  if (state = ALLOCATING?) then (yes)
+    :Mark FAILED\n(allocation incomplete);
+  elseif (state = RUNNING?) then (yes)
+    :Check agent heartbeat age;
+    if (heartbeat < 30s?) then (yes)
+      :Attempt reconnect;
+    else (no)
+      :Mark FAILED\nlog crash;
+    endif
+  elseif (state = BLOCKED?) then (yes)
+    :Re-send approval request;
+  elseif (state = PENDING?) then (yes)
+    :Re-queue to Event Bus;
+  endif
+repeat while (more sessions?) is (yes)
+-> no;
+stop
+
+@enduml

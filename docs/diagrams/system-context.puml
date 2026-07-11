@@ -1,0 +1,40 @@
+@startuml
+!theme plain
+left to right direction
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+cloud "Slack / Discord\n(User Interface)" as UI
+
+rectangle "Foreman Service\n(The Orchestrator)" as Foreman
+
+database "State Store\n(Postgres)" as StateStore
+queue "Event Bus\n(NATS)" as EventBus
+rectangle "Identity / Auth\n(OIDC)" as Identity
+
+rectangle "Agent Coordinator" as Coordinator
+
+rectangle "Agent Adapter\n(Codex)" as AdapterCodex
+rectangle "Agent Adapter\n(Claude Code)" as AdapterClaude
+rectangle "Agent Adapter\n(OpenCode)" as AdapterOpenCode
+
+rectangle "Sandbox Environment\n(Local Docker / Daytona / AWS / Remote)" as Sandbox {
+  rectangle "Agent N\n+MCP tools" as AgentN
+  rectangle "Agent N+1\n+MCP tools" as AgentN1
+  rectangle "Agent N+2\n+MCP tools" as AgentN2
+}
+
+UI --> Foreman : commands & reports
+Foreman --> StateStore
+Foreman --> EventBus
+Foreman --> Identity
+EventBus --> Coordinator
+Coordinator --> AdapterCodex
+Coordinator --> AdapterClaude
+Coordinator --> AdapterOpenCode
+AdapterCodex --> Sandbox
+AdapterClaude --> Sandbox
+AdapterOpenCode --> Sandbox
+
+@enduml
