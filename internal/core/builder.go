@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/foreman/foreman/internal/adapter"
 	"github.com/foreman/foreman/internal/config"
 	"github.com/foreman/foreman/internal/controlplane"
 	"github.com/foreman/foreman/internal/coordinator"
@@ -13,6 +14,7 @@ import (
 	"github.com/foreman/foreman/internal/sandbox"
 )
 
+// App holds all the wired subsystems.
 type App struct {
 	Config       *config.Config
 	EventBus     eventbus.EventBus
@@ -22,6 +24,7 @@ type App struct {
 	Coordinator  *coordinator.Coordinator
 }
 
+// Bootstrap reads config, creates all subsystems, and wires them together.
 func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	bus, err := newEventBus(ctx, cfg)
 	if err != nil {
@@ -42,9 +45,9 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 
 	mcp := newMCPHub(cfg)
 	cp := controlplane.New(bus)
+	adapters := newAdapters(cfg, bus)
 
-	// TODO: build adapters from config
-	co := coordinator.New(bus, cp, sbox, mcp, nil, cfg.Subsystems.Coordinator.MaxConcurrent)
+	co := coordinator.New(bus, cp, sbox, mcp, adapters, cfg.Subsystems.Coordinator.MaxConcurrent)
 
 	return &App{
 		Config:       cfg,
@@ -56,6 +59,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	}, nil
 }
 
+// newEventBus creates the event bus based on config.
 func newEventBus(ctx context.Context, cfg *config.Config) (eventbus.EventBus, error) {
 	switch cfg.Subsystems.EventBus.Kind {
 	case "memory", "":
@@ -70,6 +74,7 @@ func newEventBus(ctx context.Context, cfg *config.Config) (eventbus.EventBus, er
 	}
 }
 
+// newSandbox creates the sandbox provider based on config.
 func newSandbox(cfg *config.Config) (sandbox.Sandbox, error) {
 	switch cfg.Subsystems.Sandbox.Kind {
 	case "docker":
@@ -81,6 +86,7 @@ func newSandbox(cfg *config.Config) (sandbox.Sandbox, error) {
 	}
 }
 
+// newMCPHub creates the MCP tool hub from the static server config.
 func newMCPHub(cfg *config.Config) mcphub.MCPHub {
 	serverCfgs := make([]mcphub.MCPServerConfig, 0, len(cfg.Subsystems.MCPHub.Servers))
 	for _, s := range cfg.Subsystems.MCPHub.Servers {
@@ -94,6 +100,23 @@ func newMCPHub(cfg *config.Config) mcphub.MCPHub {
 	return mcphub.NewStaticHub(serverCfgs)
 }
 
+// newAdapters builds the configured agent adapters.
+func newAdapters(cfg *config.Config, bus eventbus.EventBus) []adapter.AgentAdapter {
+	var result []adapter.AgentAdapter
+	for _, a := range cfg.Subsystems.Agents {
+		switch a.Kind {
+		case "opencode":
+			result = append(result, adapter.NewOpenCodeAdapter(
+				a.Cmd, a.Cwd, bus, a.HeartbeatInterval, a.HeartbeatTimeout,
+			))
+		default:
+			log.Printf("bootstrap: unknown agent kind %q for agent %q", a.Kind, a.Name)
+		}
+	}
+	return result
+}
+
+// Shutdown gracefully shuts down the app.
 func (a *App) Shutdown(ctx context.Context) {
 	if err := a.EventBus.Close(); err != nil {
 		log.Printf("shutdown: eventbus close: %v", err)
