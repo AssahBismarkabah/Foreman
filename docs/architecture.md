@@ -292,6 +292,76 @@ type TeardownCommand struct {
 }
 ```
 
+### 3.3.1 Event Bus Implementation
+
+**Stream Configuration:**
+
+Single `foreman-events` stream with `FileStorage` and `LimitsPolicy` retention -- messages kept for 14 days regardless of consumption, enabling replay for crash recovery:
+
+```go
+streamConfig := jetstream.StreamConfig{
+    Name:     "foreman-events",
+    Subjects: []string{
+        "foreman.session.>",
+        "foreman.agent.>",
+        "foreman.approval.>",
+        "foreman.command.>",
+        "foreman.plugin.>",
+    },
+    Storage:      jetstream.FileStorage,
+    Retention:    jetstream.LimitsPolicy,
+    MaxAge:       14 * 24 * time.Hour,
+    DuplicatesWindow: 2 * time.Minute,
+}
+```
+
+**Consumer Pattern -- Pull Consumers (preferred):**
+
+All event processors use pull consumers with explicit acknowledgements. Pull consumers give the application control over fetch rate (built-in backpressure). Durable consumers auto-resume from the last acknowledged message on restart -- no manual recovery logic needed.
+
+```go
+consumer, _ := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+    Durable:       "foreman-session-worker",
+    AckPolicy:     jetstream.AckExplicitPolicy,
+    DeliverPolicy: jetstream.DeliverAllPolicy,
+    MaxAckPending: 100,
+    MaxDeliver:    10,
+    AckWait:       30 * time.Second,
+})
+```
+
+**Exactly-Once Delivery (Three Layers):**
+
+1. **Publish deduplication:** Each event carries a unique ID via `Nats-Msg-Id` header; NATS server drops duplicates within a 2-minute window.
+2. **Consumer ack policy:** `AckExplicitPolicy` requires every message to be individually acknowledged. Un-acked messages are redelivered (up to `MaxDeliver`).
+3. **Idempotent handlers:** Event processors are designed to handle duplicate deliveries safely (check-then-act pattern).
+
+**Crash Recovery:**
+
+- On restart, durable consumers automatically resume from the last acknowledged sequence position
+- For full state rebuild, create a temporary consumer with `DeliverByStartTimePolicy` to replay events from a specific point in time
+- Core NATS subjects (heartbeats, logs) are at-most-once and lost on crash -- acceptable for transient data
+
+**Deployment:**
+
+- **Development/testing:** Embedded NATS server running in-process with the Foreman binary. Single binary deployment, zero external dependencies.
+- **Production:** Separate NATS server cluster (3 nodes minimum), JetStream enabled, file-based storage with replication factor 3.
+- **Monitoring:** Prometheus NATS exporter + Grafana dashboard; key metric is `jetstream_consumer_ack_pending` for slow consumer detection.
+
+```go
+// Embedded NATS for development
+import "github.com/nats-io/nats-server/v2/server"
+
+opts := &server.Options{
+    Port:           -1,           // random port
+    JetStream:      true,
+    JetStreamMaxStore: 10 * 1024 * 1024 * 1024,
+}
+ns, err := server.NewServer(opts)
+go ns.Start()
+nc, err := nats.Connect(ns.ClientURL())
+```
+
 ### 3.4 State Store
 
 The memory. All durable state lives here.
@@ -610,22 +680,66 @@ The Control Plane uses this to match tasks to agents: if a task requires `pr.cre
 
 ### 6.4 Example: Claude Code Adapter
 
-Claude Code runs as a terminal process. The adapter:
+Claude Code runs as a subprocess. The adapter:
+
 1. Verifies `claude` binary is in the sandbox PATH
 2. Sets environment variables (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_CONFIG`)
-3. Starts Claude in non-interactive mode with structured output
-4. Parses Claude's structured output into AgentEvents
-5. Maps Claude's tool calls to the Foreman tool model
-6. Claude's built-in MCP support is used directly
+3. Launches Claude in headless mode:
+
+```bash
+claude --bare -p "<task>" \
+  --output-format json \
+  --allowedTools "Read,Edit,Bash(git *),Bash(npm *),Bash(go *),Grep" \
+  --max-turns 40 \
+  --max-budget-usd 2 \
+  --permission-mode bypassPermissions
+```
+
+4. Parses JSON output: reads `.result` for answer text, `.session_id` for continuation, `.total_cost_usd` for cost tracking
+5. Exit code 0 = success; non-zero = failure (check stderr for details). Always parse JSON output rather than relying on exit codes alone.
+6. For multi-turn sessions: capture session ID from JSON output, then call with `--resume <session_id>`
+7. Claude's built-in MCP support is used directly, with tools scoped via `--allowedTools`
+
+**Important:** `--permission-mode bypassPermissions` requires a one-time interactive acceptance on first run. Set `skipDangerousModePermissionPrompt: true` in `~/.claude/settings.json` for fully unattended operation. In sandboxed environments this is safe -- the flag name is deliberately alarming.
+
+**Alternative SDK path:** Anthropic also publishes Agent SDKs (`anthropic-agent-sdk` for Python, `@anthropic-ai/claude-agent-sdk` for TypeScript) that wrap the same CLI as a subprocess internally, providing higher-level programmatic APIs.
 
 ### 6.5 Example: OpenCode Adapter
 
-OpenCode runs as a service with its own MCP endpoint. The adapter:
-1. Verifies the opencode binary is available
-2. Starts opencode in server mode
-3. Communicates via its API/stdio protocol
-4. Feeds task context as prompts
-5. Routes MCP tool requests through the Foreman MCP Hub
+OpenCode can be driven in two ways:
+
+**Path A -- Server Mode (Preferred):**
+
+Start `opencode serve --port 4096` as a background process (HTTP API):
+- `POST /session` -- create a new session
+- `POST /session/:id/message` -- submit a message/task
+- `GET /event` -- SSE stream for session events
+- `POST /session/:id/abort` -- cancel a running session
+
+This is the most reliable approach for persistent, multi-turn agent sessions.
+
+**Path B -- Run Mode (One-shot tasks):**
+
+```bash
+opencode run --format json --model anthropic/claude-sonnet-4-5 \
+  --agent build "Implement the login feature"
+```
+
+Output is newline-delimited JSON (JSONL) on stdout with five event types:
+
+| Event | When | Key Fields |
+|-------|------|-----------|
+| `step_start` | Processing begins | `sessionID` |
+| `tool_use` | Tool completes | `part.tool`, `part.state.output` |
+| `text` | Model text output | `part.text` |
+| `step_finish` | Step ends | `part.reason` (stop/tool-calls), `part.cost` |
+| `error` | Session error | `error.name`, `error.data.message` |
+
+**Critical Caveats:**
+- Permission system has hard-coded defaults. Built-in agents include deny/ask rules (e.g., `external_directory: ask`) that require TUI interaction even with `--auto`.
+- Exit codes are unreliable (often 0 even on failure). Always parse the JSONL stream for `error` events or wait for `step_finish` with `reason: stop`.
+- Session permission presets are set at bootstrap with `question: deny`, `plan_enter: deny`, `plan_exit: deny` and cannot be overridden via config.
+- The server mode (Path A) provides more control by working around permission limitations through the HTTP API.
 
 ---
 
@@ -677,6 +791,47 @@ Managed by the Agent Coordinator within each sandbox:
 - **Stop:** On sandbox teardown, gracefully shut down all MCP servers
 - **Log:** Capture MCP server logs for debugging
 
+### 7.5 Protocol Version Support
+
+MCP has two active protocol versions. The Hub must support both:
+
+**Legacy (2025-11-25) -- Session-based:**
+- Requires `initialize` handshake before operation: exchange protocol versions, capabilities, client/server info
+- Client sends `notifications/initialized` to complete handshake
+- Session state maintained over transport connection
+- Transport: stdio subprocess or HTTP+SSE
+
+**Modern (2026-07-28) -- Stateless:**
+- No handshake required; each request is self-contained
+- Protocol version and capabilities carried in `_meta` field on every request
+- Optional `server/discover` RPC for capability probing
+- Cancellation: close SSE response stream (HTTP) or `notifications/cancelled` (stdio)
+- Transport: stdio subprocess or Streamable HTTP (single endpoint, POST only)
+
+**Go SDKs:**
+
+| SDK | Version | Maturity | Protocol | Use For |
+|-----|---------|----------|----------|---------|
+| `mark3labs/mcp-go` | v0.31+ | 2500+ stars, MIT | 2025-11-25 | Initial Hub implementation |
+| `modelcontextprotocol/go-sdk` | v1.1+ | Official (Google) | 2026-07-28 | Modern protocol upgrade path |
+
+**Hub strategy -- version detection:**
+
+```
+Probe with server/discover ------> Modern (2026-07-28)
+  |                                  
+  +--> MethodNotFound / UnsupportedProtocolVersionError
+       |
+       +--> Fall back to initialize handshake --> Legacy (2025-11-25)
+```
+
+Cache the detected era per server endpoint.
+
+**Transport handling:**
+
+- **stdio (sandbox-managed servers):** Hub spawns the MCP server as a subprocess inside the sandbox, writes JSON-RPC to stdin, reads responses from stdout. Server logs go to stderr. On teardown: close stdin, SIGTERM, SIGKILL if needed.
+- **Streamable HTTP (external servers):** Each request is an HTTP POST to the server's endpoint. For external servers, the Hub manages OAuth 2.1 with PKCE authentication and token refresh.
+
 ---
 
 ## 8. Sandbox Architecture
@@ -698,14 +853,24 @@ type Sandbox interface {
 }
 ```
 
+**Vendor lock-in decision:** We do NOT use third-party sandbox platforms (Daytona, Modal, E2B, Northflank) that charge per-use and create vendor dependency. Instead, we self-host using open-source isolation technology. The Sandbox interface is designed to abstract the provider -- switching from Docker to gVisor to Kata requires only a new implementation.
+
+**Isolation tiers (self-hosted, open source):**
+
+- **Tier 1 (Production, multi-tenant):** Kata Containers with Firecracker backend. Hardware-level VM isolation via KVM. OCI-compatible -- same `docker run` workflow with `--runtime=kata`. Open source (OpenInfra Foundation), no vendor lock-in. ~200ms cold start, full syscall compatibility.
+- **Tier 2 (Production, single-tenant):** Docker + gVisor (runsc). Userspace kernel intercepts syscalls. ~1-10ms cold start, ~200 syscalls implemented. Simpler to operate than Kata but shares host kernel.
+- **Tier 3 (Development):** Plain Docker (runc). Shared kernel, sufficient for single-user dev. Zero additional setup.
+
 ### 8.2 Sandbox Types
 
-| Type | Use Case | Provision Time | Cost | Isolation |
-|------|----------|---------------|------|-----------|
-| **Local Docker** | Dev, single-user, low concurrency | 1-3s | Free | Container |
-| **Daytona** | Remote workspaces, persistent dev envs | 10-30s | Compute cost + Daytona | Full VM |
-| **AWS EC2/ECS** | Production, high concurrency, GPUs | 30-120s | Cloud compute | Full VM |
-| **Kubernetes Pod** | Org-scale, existing infra | 5-15s | Cluster resources | Container + network policy |
+| Technology | Isolation | Cold Start | Memory Overhead | Syscall Compat | OCI Compat | Ops Complexity | Use Case |
+|-----------|-----------|-----------|----------------|---------------|-----------|---------------|----------|
+| **Docker (runc)** | Shared kernel (namespace) | <100ms | Negligible | Full | Native | Low | Dev, single-user |
+| **gVisor (runsc)** | Userspace kernel | 1-10ms | 10-50MB | ~200 syscalls | Native | Low | Single-tenant production |
+| **Kata + Firecracker** | Hardware VM (KVM) | 150-300ms | 50-150MB | Full (real kernel) | Native | Medium | Multi-tenant production |
+| **Pure Firecracker** | Hardware VM (KVM) | 100-300ms | 5-10MB + guest kernel | Full (real kernel) | Not native | High | Max density/scale |
+
+**Not recommended:** Building your own sandbox using Linux namespaces + cgroups + seccomp. Shared-kernel isolation (namespaces) is not a security boundary for untrusted agent code. Maintaining seccomp profiles is extremely tedious and breakage is silent. If you need more than Docker, use gVisor or Kata.
 
 ### 8.3 Resource Limits
 
@@ -756,8 +921,10 @@ sandbox_overrides:
 | Core language | Go | Single binary, excellent concurrency (goroutines per session), strong standard library, good Docker support |
 | State Store | PostgreSQL | Reliable, well-understood, JSONB for checkpoints, good tooling |
 | Event Bus | NATS | Lightweight, embedded mode for small deployments, clustered for scale, simple protocol |
-| Sandbox (local) | Docker API | Universal, well-documented, resource limits via cgroups |
-| Sandbox (remote) | Daytona + AWS | Daytona for dev workspaces, AWS for production workloads |
+| Sandbox (dev) | Docker (runc) | Zero setup, instant start, shared kernel -- sufficient for single-user |
+| Sandbox (single-tenant prod) | Docker + gVisor (runsc) | Open source, userspace kernel isolation, ~1-10ms cold start |
+| Sandbox (multi-tenant prod) | Kata Containers + Firecracker | Open source, hardware VM isolation via KVM, OCI-compatible, no vendor lock-in |
+| Sandbox (max density) | Pure Firecracker via Go SDK | Full control at highest ops cost -- only at scale |
 | Communication | Slack SDK + Discord SDK | Official SDKs, well-maintained, interactive component support |
 | Identity | OIDC + GitHub/GitLab Apps | Standard protocol, scoped tokens, well-supported |
 | MCP servers | npm packages + custom | Growing ecosystem of open-source MCP servers |
@@ -772,6 +939,8 @@ sandbox_overrides:
 3. **Why not run agents on the Foreman host?** Security isolation, resource containment, and independent lifecycle management. Agents are untrusted code (they run arbitrary terminal commands). They should never share a process space with the orchestrator.
 
 4. **Why checkpoint-based recovery instead of hot failover?** Simpler to implement correctly. Hot failover requires consensus, leader election, and state replication. Checkpoint recovery is "fail fast, retry from last known good state" -- good enough for a developer tool and far more reliable in practice.
+
+5. **Why no vendor-locked sandbox platforms?** Platforms like Daytona, Modal, and E2B provide excellent isolation but charge per-use and create vendor dependency. By using open-source isolation layers (gVisor, Kata Containers + Firecracker) that are OCI-compatible, we can run the same sandbox infrastructure anywhere -- developer laptop, bare metal, or cloud VM. The Sandbox interface abstracts the provider, so the decision can be revisited without code changes.
 
 ---
 
