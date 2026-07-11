@@ -311,7 +311,7 @@ type AllocateCommand struct {
     Meta        EventMeta     `json:"meta"`
     AgentType   string        `json:"agent_type"`
     TaskSpec    json.RawMessage `json:"task_spec"`
-    SandboxType string        `json:"sandbox_type"`
+    SandboxType SandboxType   `json:"sandbox_type"`
     Tools       []string      `json:"tools"`
 }
 
@@ -466,6 +466,21 @@ type Plugin interface {
     // Outbound messages
     SendMessage(ctx context.Context, channel string, msg Message) error
     SendBlockMessage(ctx context.Context, channel string, blocks []Block) error
+}
+
+// Message is a simple text message for chat platforms.
+type Message struct {
+    Text    string `json:"text"`
+    Thread  string `json:"thread,omitempty"`
+}
+
+// Block is a rich UI element (Slack Block Kit or Discord embed).
+// The plugin serializes platform-specific blocks internally; the
+// interface uses a generic representation.
+type Block struct {
+    Type    string            `json:"type"`              // "section", "actions", "context", etc.
+    Fields  map[string]any    `json:"fields,omitempty"`
+    Elements []map[string]any `json:"elements,omitempty"`
 }
 ```
 
@@ -881,6 +896,18 @@ type ToolBinding struct {
     Args         []string    `json:"args,omitempty"`
     URL          string      `json:"url,omitempty"`        // for SSE/HTTP servers
     AllowedTools []string    `json:"allowed_tools,omitempty"`
+}
+
+// MCPServerConfig is the runtime representation of a registered MCP server.
+// It maps to the YAML tool registry schema.
+type MCPServerConfig struct {
+    Name        string   `json:"name"`
+    Command     string   `json:"command"`
+    Args        []string `json:"args,omitempty"`
+    AuthMethod  string   `json:"auth_method,omitempty"`
+    Capabilities []Capability `json:"capabilities,omitempty"`
+    AllowedPaths  []string `json:"allowed_paths,omitempty"`
+    AllowedCommands []string `json:"allowed_commands,omitempty"`
 }
 
 // MCPHub is the interface for the tool registry component.
