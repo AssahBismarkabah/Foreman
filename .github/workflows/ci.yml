@@ -7,22 +7,44 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
-
-      - name: Install opencode
-        run: curl -fsSL https://opencode.ai/install | bash
-
-      - run: make build
-      - run: make test
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Cache opencode
+        id: cache-opencode
+        uses: actions/cache@v4
+        with:
+          path: ~/.opencode/bin
+          key: opencode-${{ runner.os }}-v1
+
+      - name: Install opencode
+        if: steps.cache-opencode.outputs.cache-hit != 'true'
+        run: curl -fsSL https://opencode.ai/install | bash
+
+      - name: Add opencode to PATH
+        run: echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+
+      - run: make build
+      - run: make test

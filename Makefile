@@ -1,4 +1,4 @@
-.PHONY: build run test lint clean
+.PHONY: build run test lint ci clean
 
 build:
 	go build -o bin/foreman ./cmd/foreman
@@ -10,7 +10,10 @@ test:
 	go test ./...
 
 lint:
-	go vet ./...
+	golangci-lint run ./...
+
+ci: lint test
+	go build ./...
 
 clean:
 	rm -rf bin/
