@@ -132,6 +132,37 @@ foreman.command.<action>      -- internal commands (Control Plane -> Coordinator
 foreman.plugin.<name>.<event> -- plugin I/O
 ```
 
+**EventBus Interface:**
+
+The core contract for all async pub/sub. Components do not depend on NATS directly -- they depend on this interface:
+
+```go
+type EventBus interface {
+    // Publish sends a message to a subject. For critical events, the
+    // implementation uses JetStream for at-least-once delivery.
+    Publish(ctx context.Context, subject string, data []byte) error
+
+    // Subscribe registers a handler for messages matching a subject pattern.
+    // Patterns use NATS-style wildcards: * matches one token, > matches
+    // the remainder. Returns a close function to unsubscribe.
+    Subscribe(ctx context.Context, subject string, handler EventHandler) (func() error, error)
+}
+
+type EventHandler func(ctx context.Context, msg EventMessage)
+
+type EventMessage struct {
+    Subject string
+    Data    []byte
+    Timestamp time.Time
+    // Ack acknowledges the message. Required for JetStream consumers.
+    Ack func() error
+    // Nak marks the message as failed for redelivery. Optional.
+    Nak func() error
+}
+```
+
+The `Ack`/`Nak` functions on `EventMessage` allow the handler to signal success or failure without depending on the underlying transport (Core NATS vs JetStream).
+
 **Event Schemas:**
 
 Every event embeds standard metadata:
@@ -654,6 +685,68 @@ type AgentAdapter interface {
 }
 ```
 
+### 6.2.1 Shared Types
+
+The AgentAdapter interface references these types. They are shared across the Control Plane, Coordinator, and adapters:
+
+```go
+// TaskSpec describes a task submitted by a user via a communication plugin.
+// It is created by the Control Plane and passed to the adapter.
+type TaskSpec struct {
+    SessionID string   `json:"session_id"`
+    UserID    string   `json:"user_id"`
+    Prompt    string   `json:"prompt"`
+    RepoURL   string   `json:"repo_url,omitempty"`
+    Branch    string   `json:"branch,omitempty"`
+    Files     []string `json:"files,omitempty"`  // specific files to work on
+    Context   string   `json:"context,omitempty"` // additional context (diffs, logs, errors)
+}
+
+// AgentConfig is produced by BuildConfig and consumed by the Coordinator.
+// It tells the Coordinator how to launch the agent inside a sandbox.
+type AgentConfig struct {
+    Command   []string          `json:"command"`             // argv[0] + args
+    Env       map[string]string `json:"env,omitempty"`       // additional environment variables
+    WorkDir   string            `json:"work_dir,omitempty"`  // working directory inside sandbox
+    MCPConfig *MCPAgentConfig   `json:"mcp_config,omitempty"` // MCP servers for this agent
+}
+
+type MCPAgentConfig struct {
+    Servers []MCPServerBinding `json:"servers"`
+}
+
+type MCPServerBinding struct {
+    Name      string `json:"name"`
+    Transport string `json:"transport"` // "stdio" or "sse"
+    Command   string `json:"command,omitempty"` // for stdio servers
+    Args      []string `json:"args,omitempty"`
+    URL       string `json:"url,omitempty"`     // for SSE servers
+}
+
+// AgentEvent is the structured output from parsing one unit of agent output.
+// The adapter's ParseEvent method translates raw agent stdout/stderr into
+// these normalized events for the Control Plane.
+type AgentEvent struct {
+    Type      AgentEventType `json:"type"`
+    Content   string         `json:"content,omitempty"`
+    ToolName  string         `json:"tool_name,omitempty"`
+    ToolInput map[string]any `json:"tool_input,omitempty"`
+    ToolResult string        `json:"tool_result,omitempty"`
+    Error     string         `json:"error,omitempty"`
+    Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+type AgentEventType string
+
+const (
+    AgentEventText      AgentEventType = "text"       // model-generated text
+    AgentEventToolUse   AgentEventType = "tool_use"    // agent called a tool
+    AgentEventToolResult AgentEventType = "tool_result" // tool returned a result
+    AgentEventError     AgentEventType = "error"       // agent reported an error
+    AgentEventDone      AgentEventType = "done"        // agent finished its task
+)
+```
+
 ### 6.3 Agent Capability Model
 
 Each agent declares what it can do:
@@ -774,6 +867,33 @@ mcp_servers:
     capabilities: [CapTestRun]
 ```
 
+**ToolBinding Type:**
+
+The Coordinator passes tool bindings to the adapter when building the agent config:
+
+```go
+// ToolBinding describes an MCP server that should be available to an agent.
+// Produced by the MCP Hub, consumed by AgentAdapter.BuildConfig.
+type ToolBinding struct {
+    ServerName   string      `json:"server_name"`
+    Transport    string      `json:"transport"`            // "stdio" or "sse"
+    Command      string      `json:"command,omitempty"`    // for stdio servers
+    Args         []string    `json:"args,omitempty"`
+    URL          string      `json:"url,omitempty"`        // for SSE/HTTP servers
+    AllowedTools []string    `json:"allowed_tools,omitempty"`
+}
+
+// MCPHub is the interface for the tool registry component.
+type MCPHub interface {
+    // ResolveTools selects MCP servers matching the requested capabilities.
+    ResolveTools(ctx context.Context, caps []Capability) ([]ToolBinding, error)
+    // RegisterServer adds an MCP server to the registry.
+    RegisterServer(ctx context.Context, config MCPServerConfig) error
+    // ListServers returns all registered MCP servers.
+    ListServers(ctx context.Context) ([]MCPServerConfig, error)
+}
+```
+
 ### 7.3 Dynamic Binding
 
 When an agent is spawned:
@@ -860,6 +980,69 @@ type Sandbox interface {
 - **Tier 1 (Production, multi-tenant):** Kata Containers with Firecracker backend. Hardware-level VM isolation via KVM. OCI-compatible -- same `docker run` workflow with `--runtime=kata`. Open source (OpenInfra Foundation), no vendor lock-in. ~200ms cold start, full syscall compatibility.
 - **Tier 2 (Production, single-tenant):** Docker + gVisor (runsc). Userspace kernel intercepts syscalls. ~1-10ms cold start, ~200 syscalls implemented. Simpler to operate than Kata but shares host kernel.
 - **Tier 3 (Development):** Plain Docker (runc). Shared kernel, sufficient for single-user dev. Zero additional setup.
+
+**Sandbox Types and Shared Types:**
+
+The Sandbox interface references these types:
+
+```go
+// SandboxType enumerates the supported sandbox implementations.
+type SandboxType string
+
+const (
+    SandboxDocker      SandboxType = "docker"
+    SandboxGVisor      SandboxType = "gvisor"
+    SandboxKata        SandboxType = "kata"
+    SandboxFirecracker SandboxType = "firecracker"
+)
+
+// SandboxSpec defines how to provision a sandbox.
+type SandboxSpec struct {
+    Type         SandboxType       `json:"type"`
+    Image        string            `json:"image"`                  // container image
+    CPU          string            `json:"cpu,omitempty"`          // e.g. "2", "500m"
+    Memory       string            `json:"memory,omitempty"`       // e.g. "4Gi", "512Mi"
+    Disk         string            `json:"disk,omitempty"`         // e.g. "10Gi"
+    Network      string            `json:"network,omitempty"`      // "isolated", "outbound", "full"
+    Timeout      time.Duration     `json:"timeout,omitempty"`
+    Env          map[string]string `json:"env,omitempty"`
+    WorkDir      string            `json:"work_dir,omitempty"`
+    RepoURL      string            `json:"repo_url,omitempty"`     // repo to clone on provision
+    RepoBranch   string            `json:"repo_branch,omitempty"`
+}
+
+// ExecutionResult is returned by Sandbox.Execute.
+type ExecutionResult struct {
+    Stdout   string        `json:"stdout"`
+    Stderr   string        `json:"stderr"`
+    ExitCode int           `json:"exit_code"`
+    Duration time.Duration `json:"duration,omitempty"`
+}
+
+// SandboxEvent is an event emitted by a running sandbox (log, status, error).
+type SandboxEvent struct {
+    Type      SandboxEventType `json:"type"`
+    Data      string           `json:"data,omitempty"`
+    Timestamp time.Time        `json:"timestamp"`
+}
+
+type SandboxEventType string
+
+const (
+    SandboxEventLog    SandboxEventType = "log"     // agent stdout/stderr line
+    SandboxEventStatus SandboxEventType = "status"  // sandbox state change
+    SandboxEventError  SandboxEventType = "error"   // sandbox-level error
+    SandboxEventOOM    SandboxEventType = "oom"     // out of memory
+)
+
+// SandboxStatus is returned by Sandbox.Heartbeat.
+type SandboxStatus struct {
+    Alive       bool    `json:"alive"`
+    CPUUsage    float64 `json:"cpu_usage,omitempty"`
+    MemoryUsage float64 `json:"memory_usage,omitempty"`
+    Uptime      string  `json:"uptime,omitempty"`
+}
+```
 
 ### 8.2 Sandbox Types
 
