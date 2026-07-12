@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -228,7 +229,11 @@ func runMigrations(ctx context.Context, dsn string) error {
 	if err != nil {
 		return fmt.Errorf("init migration: %w", err)
 	}
-	defer m.Close()
+	defer func() {
+		if sErr, dErr := m.Close(); sErr != nil || dErr != nil {
+			log.Printf("statestore: close migration: source=%v, database=%v", sErr, dErr)
+		}
+	}()
 
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		return fmt.Errorf("apply migrations: %w", err)
