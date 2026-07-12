@@ -1,6 +1,6 @@
 # Foreman
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/foreman/foreman)](https://goreportcard.com/report/github.com/foreman/foreman) [![Release](https://img.shields.io/github/v/release/AssahBismarkabah/Foreman?sort=semver)](https://github.com/AssahBismarkabah/Foreman/releases)
+[![Release](https://img.shields.io/github/v/release/AssahBismarkabah/Foreman?sort=semver)](https://github.com/AssahBismarkabah/Foreman/releases)
 
 <img src="docs/logo.png" width="100">
 
