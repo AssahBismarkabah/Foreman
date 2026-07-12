@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/foreman/foreman/internal/adapter"
@@ -93,6 +94,8 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		cfg.Subsystems.Coordinator.BackoffBase,
 		cfg.Subsystems.Coordinator.BackoffMultiplier,
 		cfg.Subsystems.Coordinator.Jitter,
+		parseFloat64(cfg.Subsystems.Sandbox.CPUAlertPercent, 0),
+		parseFloat64(cfg.Subsystems.Sandbox.MemoryAlertPercent, 0),
 	)
 
 	// Reap orphaned Docker containers from previous runs.
@@ -347,6 +350,19 @@ func newPlugins(cfg *config.Config) []plugins.Plugin {
 		}))
 	}
 	return result
+}
+
+// parseFloat64 parses a string into a float64. Returns the fallback value on
+// parse failure or if the string is empty.
+func parseFloat64(s string, fallback float64) float64 {
+	if s == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 // Shutdown gracefully shuts down the app with a 3-phase drain sequence:

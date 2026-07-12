@@ -31,25 +31,29 @@ type ApprovalResponse struct {
 
 // Coordinator receives tasks, provisions sandboxes, and runs agents.
 type Coordinator struct {
-	bus               eventbus.EventBus
-	cp                *controlplane.ControlPlane
-	sbox              sandbox.Sandbox
-	mcpHub            mcphub.MCPHub
-	adapters          map[string]adapter.AgentAdapter
-	policies          []policy.Policy
-	maxConcurrent     int
-	active            map[string]context.CancelFunc
-	tokenIssuer       *identity.Issuer     // optional, for scoped agent tokens
-	heartbeatInterval time.Duration        // how often to check sandbox liveness (0 = disabled)
-	heartbeatTimeout  time.Duration        // max interval without heartbeat before declaring crash
-	sessionHeartbeats map[string]time.Time // sessionID -> last successful heartbeat time
-	sessionAttempts   map[string]int       // sessionID -> current retry attempt count
-	maxRetries        int                  // max crash recovery retries
-	backoffBase       time.Duration        // base delay for exponential backoff
-	backoffMultiplier float64              // multiplier per retry attempt
-	jitter            time.Duration        // random jitter added to backoff delay
-	accepting         bool
-	mu                sync.Mutex
+	bus                 eventbus.EventBus
+	cp                  *controlplane.ControlPlane
+	sbox                sandbox.Sandbox
+	mcpHub              mcphub.MCPHub
+	adapters            map[string]adapter.AgentAdapter
+	policies            []policy.Policy
+	maxConcurrent       int
+	active              map[string]context.CancelFunc
+	tokenIssuer         *identity.Issuer     // optional, for scoped agent tokens
+	heartbeatInterval   time.Duration        // how often to check sandbox liveness (0 = disabled)
+	heartbeatTimeout    time.Duration        // max interval without heartbeat before declaring crash
+	sessionHeartbeats   map[string]time.Time // sessionID -> last successful heartbeat time
+	sessionAttempts     map[string]int       // sessionID -> current retry attempt count
+	maxRetries          int                  // max crash recovery retries
+	backoffBase         time.Duration        // base delay for exponential backoff
+	backoffMultiplier   float64              // multiplier per retry attempt
+	jitter              time.Duration        // random jitter added to backoff delay
+	accepting           bool
+	cpuAlertPercent     float64              // 0 = disabled
+	memoryAlertPercent  float64              // 0 = disabled
+	lastResourceAlert   map[string]time.Time // sessionID -> last alert time (debounce)
+	lastResourceAlertMu sync.Mutex
+	mu                  sync.Mutex
 }
 
 // New creates a Coordinator.
@@ -70,6 +74,8 @@ func New(
 	backoffBase time.Duration,
 	backoffMultiplier float64,
 	jitter time.Duration,
+	cpuAlertPercent float64,
+	memoryAlertPercent float64,
 ) *Coordinator {
 	adapterMap := make(map[string]adapter.AgentAdapter)
 	for _, a := range adapters {
@@ -94,24 +100,27 @@ func New(
 		jitter = 1 * time.Second
 	}
 	return &Coordinator{
-		bus:               bus,
-		cp:                cp,
-		sbox:              sbox,
-		mcpHub:            mcpHub,
-		adapters:          adapterMap,
-		policies:          policies,
-		maxConcurrent:     maxConcurrent,
-		active:            make(map[string]context.CancelFunc),
-		tokenIssuer:       tokenIssuer,
-		heartbeatInterval: heartbeatInterval,
-		heartbeatTimeout:  heartbeatTimeout,
-		sessionHeartbeats: make(map[string]time.Time),
-		sessionAttempts:   make(map[string]int),
-		maxRetries:        maxRetries,
-		backoffBase:       backoffBase,
-		backoffMultiplier: backoffMultiplier,
-		jitter:            jitter,
-		accepting:         true,
+		bus:                bus,
+		cp:                 cp,
+		sbox:               sbox,
+		mcpHub:             mcpHub,
+		adapters:           adapterMap,
+		policies:           policies,
+		maxConcurrent:      maxConcurrent,
+		active:             make(map[string]context.CancelFunc),
+		tokenIssuer:        tokenIssuer,
+		heartbeatInterval:  heartbeatInterval,
+		heartbeatTimeout:   heartbeatTimeout,
+		sessionHeartbeats:  make(map[string]time.Time),
+		sessionAttempts:    make(map[string]int),
+		maxRetries:         maxRetries,
+		backoffBase:        backoffBase,
+		backoffMultiplier:  backoffMultiplier,
+		jitter:             jitter,
+		accepting:          true,
+		cpuAlertPercent:    cpuAlertPercent,
+		memoryAlertPercent: memoryAlertPercent,
+		lastResourceAlert:  make(map[string]time.Time),
 	}
 }
 
@@ -322,6 +331,11 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		go c.monitorHeartbeat(heartbeatCtx, sessionID, sandboxID, crashCh)
 	}
 
+	// --- Start resource monitor (if thresholds configured) ---
+	if c.cpuAlertPercent > 0 || c.memoryAlertPercent > 0 {
+		go c.monitorResources(heartbeatCtx, sessionID, sandboxID)
+	}
+
 	// --- Execute the agent in the sandbox ---
 	// The heartbeat monitor can cancel heartbeatCtx to interrupt the agent
 	// if the sandbox stops responding.
@@ -462,6 +476,69 @@ func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID
 				c.sessionHeartbeats[sessionID] = time.Now()
 				c.mu.Unlock()
 			}
+		}
+	}
+}
+
+// monitorResources runs alongside the heartbeat monitor and periodically
+// checks sandbox resource usage (CPU, memory). If thresholds are set and
+// breached, it emits an audit event and logs a warning. Alerts are debounced
+// to at most once per 60s per session. Returns immediately if resource
+// thresholds are disabled (cpuAlertPercent == 0 && memoryAlertPercent == 0).
+func (c *Coordinator) monitorResources(ctx context.Context, sessionID, sandboxID string) {
+	if c.cpuAlertPercent <= 0 && c.memoryAlertPercent <= 0 {
+		return
+	}
+	// Check every 60s — Docker stats is not free to poll.
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Stats is an optional interface -- check at runtime.
+			statsProvider, statsOk := c.sbox.(sandbox.StatsProvider)
+			if !statsOk {
+				return
+			}
+			usage, err := statsProvider.Stats(ctx, sandboxID)
+			if err != nil {
+				log.Printf("coordinator: resource stats for session %s: %v", sessionID, err)
+				continue
+			}
+
+			var alerts []string
+			if c.cpuAlertPercent > 0 && usage.CPUPercent > c.cpuAlertPercent {
+				alerts = append(alerts, fmt.Sprintf("CPU %.1f%% > %.1f%%", usage.CPUPercent, c.cpuAlertPercent))
+			}
+			if c.memoryAlertPercent > 0 {
+				memPct := float64(usage.MemoryBytes) / float64(usage.MemoryLimit) * 100
+				if memPct > c.memoryAlertPercent {
+					alerts = append(alerts, fmt.Sprintf("memory %.1f%% > %.1f%%", memPct, c.memoryAlertPercent))
+				}
+			}
+
+			if len(alerts) == 0 {
+				continue
+			}
+
+			// Debounce: don't emit alerts more than once per 60s per session.
+			c.lastResourceAlertMu.Lock()
+			last, has := c.lastResourceAlert[sessionID]
+			now := time.Now()
+			if has && now.Sub(last) < 60*time.Second {
+				c.lastResourceAlertMu.Unlock()
+				continue
+			}
+			c.lastResourceAlert[sessionID] = now
+			c.lastResourceAlertMu.Unlock()
+
+			log.Printf("coordinator: resource alert for session %s: %s", sessionID, strings.Join(alerts, ", "))
+			c.cp.Audit(ctx, sessionID, "coordinator.resource_alert", map[string]any{
+				"alerts": alerts,
+			})
 		}
 	}
 }

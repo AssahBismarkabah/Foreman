@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -298,6 +299,73 @@ func (d *DockerSandbox) Heartbeat(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("container status is %s (expected running)", status)
 	}
 	return nil
+}
+
+// Stats returns CPU and memory usage for the sandbox container.
+// Implements the optional StatsProvider interface.
+func (d *DockerSandbox) Stats(ctx context.Context, sessionID string) (*ResourceUsage, error) {
+	if _, err := d.lookup(sessionID); err != nil {
+		return nil, err
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format", "{{json .}}", sessionID)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker stats: %w", err)
+	}
+
+	var raw struct {
+		CPUPercent string `json:"CPUPerc"`
+		MemUsage   string `json:"MemUsage"`
+		MemLimit   string `json:"MemLimit"`
+		MemPercent string `json:"MemPerc"`
+	}
+
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse docker stats: %w", err)
+	}
+
+	usage := &ResourceUsage{}
+
+	// Parse CPU percent: "2.50%" -> 2.50
+	if raw.CPUPercent != "" {
+		_, _ = fmt.Sscanf(raw.CPUPercent, "%f", &usage.CPUPercent)
+	}
+
+	// Parse memory usage: "128.4MiB / 512MiB"
+	if raw.MemUsage != "" {
+		var used, limit float64
+		var usedUnit, limitUnit string
+		n, _ := fmt.Sscanf(raw.MemUsage, "%f%s / %f%s", &used, &usedUnit, &limit, &limitUnit)
+		if n >= 2 {
+			usage.MemoryBytes = uint64(parseMemValue(used, usedUnit))
+		}
+		if n >= 4 {
+			usage.MemoryLimit = uint64(parseMemValue(limit, limitUnit))
+		}
+	}
+
+	return usage, nil
+}
+
+// parseMemValue converts a memory value with unit suffix to bytes.
+func parseMemValue(value float64, unit string) float64 {
+	switch strings.ToUpper(unit) {
+	case "KIB":
+		return value * 1024
+	case "MIB":
+		return value * 1024 * 1024
+	case "GIB":
+		return value * 1024 * 1024 * 1024
+	case "KB":
+		return value * 1000
+	case "MB":
+		return value * 1000 * 1000
+	case "GB":
+		return value * 1000 * 1000 * 1000
+	default:
+		return value
+	}
 }
 
 func (d *DockerSandbox) Destroy(ctx context.Context, sessionID string) error {
