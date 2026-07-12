@@ -2,6 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AssahBismarkabah/Foreman?sort=semver)](https://github.com/AssahBismarkabah/Foreman/releases)
 
+---
 Foreman is an open source orchestrator that connects team chat to isolated
 agent sandboxes. It acts as a conductor for engineering work -- dispatch
 tasks from Slack or Discord, provision ephemeral sandboxes, track progress,
