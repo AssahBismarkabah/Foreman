@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -42,7 +43,20 @@ func (m *envKeyManager) SigningKey(ctx context.Context) (crypto.PrivateKey, erro
 	if raw == "" {
 		return nil, fmt.Errorf("signing key: environment variable %s is not set", m.envVar)
 	}
-	return parsePrivateKey([]byte(raw))
+	// Try raw PEM first (common for direct env var values),
+	// then fall back to base64-decoded PEM (env-var-safe, no newline issues).
+	if block, _ := pem.Decode([]byte(raw)); block != nil {
+		return parsePrivateKeyFromBlock(block)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("signing key: env var %s is neither PEM nor valid base64 (len=%d): %w", m.envVar, len(raw), err)
+	}
+	priv, err := parsePrivateKey(decoded)
+	if err != nil {
+		return nil, fmt.Errorf("signing key: parse error after base64 decode (decoded len=%d): %w", len(decoded), err)
+	}
+	return priv, nil
 }
 
 func (m *envKeyManager) VerificationKey(ctx context.Context) (crypto.PublicKey, error) {
@@ -141,7 +155,11 @@ func parsePrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 	if block == nil {
 		return nil, errors.New("no PEM block found in key data")
 	}
+	return parsePrivateKeyFromBlock(block)
+}
 
+// parsePrivateKeyFromBlock parses an RSA private key from an already-decoded PEM block.
+func parsePrivateKeyFromBlock(block *pem.Block) (*rsa.PrivateKey, error) {
 	// Try PKCS1 first, then PKCS8
 	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
 		return key, nil

@@ -38,7 +38,18 @@ type DockerSandbox struct {
 }
 
 func NewDockerSandbox(image string) (*DockerSandbox, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	// Use DOCKER_HOST env var if set, otherwise default to the standard socket.
+	// Importantly, we do NOT use client.FromEnv alone because Docker SDK v28+
+	// reads the Docker config file's currentContext, which on OrbStack points to
+	// a host-specific socket path that doesn't exist inside containers.
+	host := os.Getenv("DOCKER_HOST")
+	if host == "" {
+		host = "unix:///var/run/docker.sock"
+	}
+	cli, err := client.NewClientWithOpts(
+		client.WithHost(host),
+		client.WithAPIVersionNegotiation(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}

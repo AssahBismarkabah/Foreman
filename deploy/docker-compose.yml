@@ -54,14 +54,17 @@ services:
       args:
         VERSION: ${FOREMAN_VERSION:-dev}
     container_name: foreman
+    user: root:root
     restart: unless-stopped
     ports:
       - "${FOREMAN_API_PORT:-8080}:8080"
     environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
       FOREMAN_PG_DSN: postgres://${FOREMAN_PG_USER:-foreman}:${FOREMAN_PG_PASSWORD:-foreman}@postgres:5432/${FOREMAN_PG_DATABASE:-foreman}?sslmode=disable
       FOREMAN_SIGNING_KEY: ${FOREMAN_SIGNING_KEY:-}
     volumes:
       - ../foreman.yaml:/etc/foreman/foreman.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     command: ["--config", "/etc/foreman/foreman.yaml"]
     depends_on:
       postgres:
