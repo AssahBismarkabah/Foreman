@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/foreman/foreman/internal/identity"
 )
 
 type Config struct {
@@ -13,13 +15,14 @@ type Config struct {
 }
 
 type Subsystems struct {
-	EventBus    EventBusConfig    `yaml:"eventbus"`
-	StateStore  StateStoreConfig  `yaml:"statestore"`
-	Sandbox     SandboxConfig     `yaml:"sandbox"`
-	Coordinator CoordinatorConfig `yaml:"coordinator"`
-	Agents      []AgentConfig     `yaml:"agents"`
-	MCPHub      MCPHubConfig      `yaml:"mcphub"`
-	Plugins     PluginsConfig     `yaml:"plugins"`
+	EventBus    EventBusConfig                  `yaml:"eventbus"`
+	StateStore  StateStoreConfig                `yaml:"statestore"`
+	Sandbox     SandboxConfig                   `yaml:"sandbox"`
+	Coordinator CoordinatorConfig               `yaml:"coordinator"`
+	Agents      []AgentConfig                   `yaml:"agents"`
+	MCPHub      MCPHubConfig                    `yaml:"mcphub"`
+	Plugins     PluginsConfig                   `yaml:"plugins"`
+	Identity    identity.IdentityProviderConfig `yaml:"identity"`
 }
 
 type EventBusConfig struct {

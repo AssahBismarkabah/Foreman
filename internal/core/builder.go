@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 
 	"github.com/foreman/foreman/internal/adapter"
+	"github.com/foreman/foreman/internal/api"
 	"github.com/foreman/foreman/internal/config"
 	"github.com/foreman/foreman/internal/controlplane"
 	"github.com/foreman/foreman/internal/coordinator"
 	"github.com/foreman/foreman/internal/eventbus"
+	"github.com/foreman/foreman/internal/identity"
+	"github.com/foreman/foreman/internal/identity/githubapp"
 	"github.com/foreman/foreman/internal/mcphub"
 	"github.com/foreman/foreman/internal/plugins"
 	"github.com/foreman/foreman/internal/plugins/discord"
@@ -30,6 +34,7 @@ type App struct {
 	ControlPlane *controlplane.ControlPlane
 	Coordinator  *coordinator.Coordinator
 	Plugins      []plugins.Plugin
+	APIServer    *api.Server
 }
 
 // Bootstrap reads config, creates all subsystems, and wires them together.
@@ -79,6 +84,17 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 
 	co := coordinator.New(bus, cp, sbox, mcp, adapters, policies, cfg.Subsystems.Coordinator.MaxConcurrent)
 
+	srv, err := newAPIServer(ctx, cfg, bus)
+	if err != nil {
+		return nil, fmt.Errorf("api server: %w", err)
+	}
+	if srv != nil {
+		if err := srv.Start(ctx); err != nil {
+			return nil, fmt.Errorf("api server start: %w", err)
+		}
+		log.Printf("bootstrap: api server listening on %s", cfg.Subsystems.Identity.API.ListenAddr)
+	}
+
 	// Resume RUNNING sessions; cancel orphaned APPROVAL sessions.
 	for _, s := range recovered {
 		switch s.Status {
@@ -114,7 +130,56 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		ControlPlane: cp,
 		Coordinator:  co,
 		Plugins:      plugs,
+		APIServer:    srv,
 	}, nil
+}
+
+// newAPIServer creates the HTTP API server with identity/health/webhook routes.
+func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus) (*api.Server, error) {
+	idCfg := cfg.Subsystems.Identity
+
+	// If no identity config is present, skip the API server.
+	if (idCfg == identity.IdentityProviderConfig{}) {
+		return nil, nil
+	}
+
+	listenAddr := idCfg.API.ListenAddr
+	if listenAddr == "" {
+		listenAddr = identity.DefaultListenAddr
+	}
+
+	srv := api.New(api.Config{
+		ListenAddr: listenAddr,
+	})
+
+	srv.RegisterRoute("GET", "/healthz", healthHandler)
+
+	// Identity endpoints
+	km, err := identity.NewSigningKeyManager(idCfg.SigningKey)
+	if err != nil {
+		return nil, fmt.Errorf("signing key manager: %w", err)
+	}
+	iss := identity.NewIssuer(km, "foreman")
+	srv.RegisterRoute("GET", "/.well-known/jwks.json", iss.JWKSHandler())
+	srv.RegisterRoute("GET", "/.well-known/openid-configuration",
+		iss.OIDCConfigurationHandler(idCfg.API.PublicURL))
+
+	// GitHub App webhook
+	if idCfg.GitHubApp != nil {
+		ghClient := githubapp.NewClient(idCfg.GitHubApp, nil)
+		ghWebhook := githubapp.NewWebhookHandler(idCfg.GitHubApp, ghClient, nil)
+		srv.RegisterRoute("POST", idCfg.GitHubApp.WebhookEndpoint, ghWebhook.ServeHTTP)
+		log.Printf("bootstrap: github app webhook at %s", idCfg.GitHubApp.WebhookEndpoint)
+	}
+
+	return srv, nil
+}
+
+// healthHandler responds with 200 OK for health checks.
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `{"status":"ok"}`)
 }
 
 // newEventBus creates the event bus based on config.
@@ -233,6 +298,11 @@ func (a *App) Shutdown(ctx context.Context) {
 	for _, p := range a.Plugins {
 		if err := p.Stop(ctx); err != nil {
 			log.Printf("shutdown: plugin %s: stop: %v", p.Name(), err)
+		}
+	}
+	if a.APIServer != nil {
+		if err := a.APIServer.Shutdown(ctx); err != nil {
+			log.Printf("shutdown: api server: %v", err)
 		}
 	}
 	if a.StateStore != nil {
