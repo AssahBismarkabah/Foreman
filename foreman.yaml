@@ -63,22 +63,22 @@ subsystems:
   #     bot_token: ${DISCORD_BOT_TOKEN}
 
   # --- Identity ---
-  # Optional. If omitted, identity features (JWT issuance, OIDC, webhooks) are
-  # disabled and no API server is started.
-  # identity:
-  #   api:
-  #     listen_addr: ":8080"
-  #     public_url: "http://localhost:8080"
-  #   signing_key:
-  #     source: env                    # "env" or "file"
-  #     env_var_name: FOREMAN_SIGNING_KEY
-  #     key_id: foreman-1
-  #     # file_path: /etc/foreman/key.pem  # if source: file
-  #   # github_app:
-  #   #   app_id: 123456
-  #   #   private_key_path: /etc/foreman/github-app.pem
-  #   #   webhook_secret: "your-webhook-secret"
-  #   #   webhook_endpoint: /api/v1/webhooks/github
+  # The API server always starts (provides /healthz). JWT/OIDC features need
+  # the signing key to be set via the FOREMAN_SIGNING_KEY env var.
+  identity:
+    api:
+      listen_addr: ":8080"
+      public_url: "http://localhost:8080"
+    signing_key:
+      source: env                    # "env" or "file"
+      env_var_name: FOREMAN_SIGNING_KEY
+      key_id: foreman-1
+      # file_path: /etc/foreman/key.pem  # if source: file
+    # GitHub App integration (optional, needs app credentials)
+    # github_app:
+    #   app_id: 123456
+    #   private_key_path: /etc/foreman/github-app.pem
+    #   webhook_secret: "your-webhook-secret"
 
   # --- MCP Hub ---
   mcphub:
