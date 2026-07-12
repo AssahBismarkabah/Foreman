@@ -86,10 +86,10 @@ clean:
 COMPOSE_FILE := deploy/docker-compose.yml
 
 up:
-	docker compose -f $(COMPOSE_FILE) up -d
+	docker compose -f $(COMPOSE_FILE) --profile service up -d
 
 up-nats:
-	docker compose -f $(COMPOSE_FILE) --profile nats up -d
+	docker compose -f $(COMPOSE_FILE) --profile service --profile nats up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down

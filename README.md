@@ -26,7 +26,7 @@ Foreman is hosted at [github.com/AssahBismarkabah/Foreman].
 See the [quickstart guide](docs/architecture.md) in the architecture doc.
 
 ```
-docker compose -f deploy/docker-compose.yml --profile service up -d
+make up
 ```
 
 To use Foreman code as a library in other applications, see the [list of
@@ -54,8 +54,8 @@ make test
 ##### You have a working [Docker environment].
 
 ```
-make docker-build
-make docker-run
+make docker
+make up
 ```
 
 For the full story, head over to the [architecture documentation](docs/architecture.md).
