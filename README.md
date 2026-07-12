@@ -1,9 +1,6 @@
 # Foreman
 
 [![Release](https://img.shields.io/github/v/release/AssahBismarkabah/Foreman?sort=semver)](https://github.com/AssahBismarkabah/Foreman/releases)
-
-<img src="docs/logo.png" width="100">
-
 ----
 
 Foreman is an open source orchestrator that connects team chat to isolated
