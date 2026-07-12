@@ -45,6 +45,28 @@ services:
       - foreman-nats-data:/data
     logging: *default-logging
 
+  # --- Foreman Orchestrator ---
+  foreman:
+    profiles: ["service"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${FOREMAN_VERSION:-dev}
+    container_name: foreman
+    restart: unless-stopped
+    ports:
+      - "${FOREMAN_API_PORT:-8080}:8080"
+    environment:
+      FOREMAN_PG_DSN: postgres://${FOREMAN_PG_USER:-foreman}:${FOREMAN_PG_PASSWORD:-foreman}@postgres:5432/${FOREMAN_PG_DATABASE:-foreman}?sslmode=disable
+    volumes:
+      - ./foreman.yaml:/etc/foreman/foreman.yaml:ro
+    command: ["--config", "/etc/foreman/foreman.yaml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
 volumes:
   foreman-pg-data:
   foreman-nats-data:

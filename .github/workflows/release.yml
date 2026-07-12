@@ -1,0 +1,128 @@
+# Release workflow
+#
+# Triggered when a tag matching v* is pushed (e.g. v1.0.0, v0.5.0-rc1).
+#
+# 1. Lint + test (same as CI)
+# 2. Build the multi-arch Docker image with BuildKit layer caching
+# 3. Push to GitHub Container Registry (ghcr.io)
+# 4. Create a GitHub Release with auto-generated changelog
+#
+# The GITHUB_TOKEN secret is built-in and has write:packages scope for GHCR.
+# No additional PAT is needed.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  quality:
+    name: Lint + Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+
+      - name: Build
+        run: go build ./...
+
+      - name: Run unit tests
+        run: go test -count=1 -short ./...
+
+  docker:
+    name: Build + Push Docker Image
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: Create GitHub Release
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate changelog
+        id: changelog
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 1
+            });
+            const lastRelease = releases[0];
+            const comparator = lastRelease ? `${lastRelease.tag_name}...${context.ref}` : context.ref;
+            const { data: commits } = await github.rest.repos.compareCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              base: comparator.includes('...') ? comparator.split('...')[0] : context.payload.before,
+              head: context.ref
+            });
+            const lines = commits.commits.map(c => `* ${c.commit.message.split('\n')[0]}`);
+            require('fs').writeFileSync('${{ runner.temp }}/changelog.txt', lines.join('\n'));
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body_path: ${{ runner.temp }}/changelog.txt
+          files: |
+            Dockerfile
+            docker-compose.yml
+            foreman.yaml

@@ -21,10 +21,38 @@ endif
 .PHONY: build run test lint ci clean
 .PHONY: up up-nats down reset logs ps wait-db
 
+VERSION ?= dev
+BUILD_FLAGS = -ldflags="-w -s -X main.version=$(VERSION)" -trimpath
+
 # --- Build ---
 
 build:
-	go build -o bin/foreman ./cmd/foreman
+	go build $(BUILD_FLAGS) -o bin/foreman ./cmd/foreman
+
+# Build for Linux (useful when building from macOS for Docker)
+build-linux:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(BUILD_FLAGS) -o bin/foreman-linux-amd64 ./cmd/foreman
+
+# --- Docker ---
+
+# Build the Docker image locally
+docker:
+	docker build \
+		-t foreman:$(VERSION) \
+		-t foreman:latest \
+		--build-arg VERSION=$(VERSION) \
+		.
+
+# --- Release (local) ---
+
+# Build binaries for all platforms
+release: clean
+	@echo "Building foreman $(VERSION)..."
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(BUILD_FLAGS) -o bin/foreman-linux-amd64 ./cmd/foreman
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(BUILD_FLAGS) -o bin/foreman-darwin-amd64 ./cmd/foreman
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(BUILD_FLAGS) -o bin/foreman-darwin-arm64 ./cmd/foreman
+	@echo "Done:"
+	@ls -lh bin/
 
 run: build
 	./bin/foreman $(ARGS)

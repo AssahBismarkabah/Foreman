@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -12,9 +13,19 @@ import (
 	"github.com/foreman/foreman/internal/core"
 )
 
+// version is set at build time via ldflags (see Makefile or Dockerfile).
+// Default "dev" so builds from source work without extra flags.
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "foreman.yaml", "path to configuration file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("foreman %s\n", version)
+		os.Exit(0)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
