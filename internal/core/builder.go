@@ -12,12 +12,14 @@ import (
 	"github.com/foreman/foreman/internal/eventbus"
 	"github.com/foreman/foreman/internal/mcphub"
 	"github.com/foreman/foreman/internal/sandbox"
+	"github.com/foreman/foreman/internal/statestore"
 )
 
 // App holds all the wired subsystems.
 type App struct {
 	Config       *config.Config
 	EventBus     eventbus.EventBus
+	StateStore   statestore.StateStore
 	Sandbox      sandbox.Sandbox
 	MCPHub       mcphub.MCPHub
 	ControlPlane *controlplane.ControlPlane
@@ -38,13 +40,29 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		}
 	}()
 
+	store, err := newStateStore(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("statestore: %w", err)
+	}
+	defer func() {
+		if err != nil && store != nil {
+			store.Close()
+		}
+	}()
+
 	sbox, err := newSandbox(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: %w", err)
 	}
 
 	mcp := newMCPHub(cfg)
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, store)
+
+	// Recover non-terminal sessions from the State Store.
+	if err := cp.Recover(ctx); err != nil {
+		return nil, fmt.Errorf("recover sessions: %w", err)
+	}
+
 	adapters := newAdapters(cfg, bus)
 
 	co := coordinator.New(bus, cp, sbox, mcp, adapters, cfg.Subsystems.Coordinator.MaxConcurrent)
@@ -52,6 +70,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	return &App{
 		Config:       cfg,
 		EventBus:     bus,
+		StateStore:   store,
 		Sandbox:      sbox,
 		MCPHub:       mcp,
 		ControlPlane: cp,
@@ -116,8 +135,26 @@ func newAdapters(cfg *config.Config, bus eventbus.EventBus) []adapter.AgentAdapt
 	return result
 }
 
+// newStateStore creates the state store based on config.
+func newStateStore(ctx context.Context, cfg *config.Config) (statestore.StateStore, error) {
+	switch cfg.Subsystems.StateStore.Kind {
+	case "postgres":
+		return statestore.NewPostgresStore(ctx, cfg.Subsystems.StateStore.DSN, statestore.PoolConfig{
+			MaxConns: cfg.Subsystems.StateStore.MaxConns,
+			MinConns: cfg.Subsystems.StateStore.MinConns,
+		})
+	case "", "memory":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unknown statestore kind: %s", cfg.Subsystems.StateStore.Kind)
+	}
+}
+
 // Shutdown gracefully shuts down the app.
 func (a *App) Shutdown(ctx context.Context) {
+	if a.StateStore != nil {
+		a.StateStore.Close()
+	}
 	if err := a.EventBus.Close(); err != nil {
 		log.Printf("shutdown: eventbus close: %v", err)
 	}

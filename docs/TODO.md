@@ -14,7 +14,7 @@ Goal: Core daemon running with a single agent type and local Docker sandbox.
 - [X] Go project scaffold (module structure, build, CI)
 - [X] Core Service skeleton (config, startup, shutdown, health)
 - [X] Config file parsing (foreman.yaml)
-- [ ] State Store schema + PostgreSQL connection
+- [X] State Store schema + PostgreSQL connection
 - [X] Event Bus (NATS + Memory with wildcards) integration
 - [X] Control Plane with session state machine
 - [X] Agent Coordinator with real Docker sandbox provisioning
@@ -22,9 +22,9 @@ Goal: Core daemon running with a single agent type and local Docker sandbox.
 - [X] MCP Hub with filesystem and git tools
 - [X] Foreman CLI (serve + task subcommands)
 - [ ] Session recovery on restart (happy path)
-- [ ] Integration test: coordinator -> real Docker -> mock adapter -> COMPLETED (checkpoint proof)
+- [X] Integration test: coordinator -> real Docker -> mock adapter -> COMPLETED (checkpoint proof)
 
-**Checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back. **NOT YET MET** -- all components tested in isolation, never wired end-to-end with real Docker through the coordinator.
+**Checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back. **MET** -- `TestIntegration_CoordinatorWithRealDocker` proves the full pipeline with real Docker sandbox, session COMPLETED, and container cleanup.
 
 ---
 

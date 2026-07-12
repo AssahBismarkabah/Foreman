@@ -1,19 +1,38 @@
+# Foreman Configuration
+#
+# Environment variables override YAML values at runtime.
+# See .env.example for all available options.
+
 subsystems:
-  # eventbus kind: "memory" (in-process, no deps) or "nats" (JetStream)
+  # --- Event Bus ---
+  # kind: "memory" (in-process, no deps) or "nats" (JetStream)
   #   nats without url = embedded NATS server (dev)
   #   nats with url = external NATS cluster (prod)
   eventbus:
     kind: memory
     # url: nats://localhost:4222
 
+  # --- State Store (PostgreSQL) ---
+  # Start with: docker compose up -d
+  # The DSN can be overridden via the FOREMAN_PG_DSN env var or
+  # the FOREMAN_PG_* individual env vars.
+  statestore:
+    kind: postgres
+    dsn: "postgres://foreman:foreman@localhost:5432/foreman?sslmode=disable"
+    max_connections: 25
+    min_connections: 5
+
+  # --- Sandbox ---
   sandbox:
     kind: docker
     image: ubuntu:22.04
 
+  # --- Coordinator ---
   coordinator:
     max_concurrent: 5
     default_timeout: 5m
 
+  # --- Agents ---
   agents:
     - name: opencode
       kind: opencode
@@ -22,6 +41,7 @@ subsystems:
       heartbeat_interval: 30s
       heartbeat_timeout: 90s
 
+  # --- MCP Hub ---
   mcphub:
     servers:
       - name: filesystem

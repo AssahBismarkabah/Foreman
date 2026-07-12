@@ -3,11 +3,13 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"github.com/foreman/foreman/internal/eventbus"
 	"github.com/foreman/foreman/internal/schemas"
+	"github.com/foreman/foreman/internal/statestore"
 )
 
 var validTransitions = map[schemas.SessionStatus][]schemas.SessionStatus{
@@ -29,13 +31,15 @@ type Session struct {
 
 type ControlPlane struct {
 	bus      eventbus.EventBus
+	store    statestore.StateStore // optional, nil = memory-only mode
 	sessions map[string]*Session
 	mu       sync.RWMutex
 }
 
-func New(bus eventbus.EventBus) *ControlPlane {
+func New(bus eventbus.EventBus, store statestore.StateStore) *ControlPlane {
 	return &ControlPlane{
 		bus:      bus,
+		store:    store,
 		sessions: make(map[string]*Session),
 	}
 }
@@ -48,6 +52,20 @@ func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID str
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+
+	// Persist to StateStore first so a failure prevents the in-memory write.
+	if cp.store != nil {
+		if err := cp.store.CreateSession(ctx, statestore.Session{
+			ID:        s.ID,
+			TaskID:    s.TaskID,
+			Status:    string(s.Status),
+			CreatedAt: s.CreatedAt,
+			UpdatedAt: s.UpdatedAt,
+		}); err != nil {
+			return fmt.Errorf("store create session: %w", err)
+		}
+	}
+
 	cp.mu.Lock()
 	cp.sessions[sessionID] = s
 	cp.mu.Unlock()
@@ -82,6 +100,13 @@ func (cp *ControlPlane) Transition(ctx context.Context, sessionID string, to sch
 	s.Status = to
 	s.UpdatedAt = time.Now()
 
+	// Persist status change to StateStore.
+	if cp.store != nil {
+		if err := cp.store.UpdateSessionStatus(ctx, sessionID, string(to), s.UpdatedAt); err != nil {
+			log.Printf("controlplane: store update session %s status: %v", sessionID, err)
+		}
+	}
+
 	var evtType schemas.EventType
 	switch to {
 	case schemas.StatusAllocating:
@@ -100,6 +125,36 @@ func (cp *ControlPlane) Transition(ctx context.Context, sessionID string, to sch
 		return fmt.Errorf("unknown status: %s", to)
 	}
 	return cp.emit(ctx, s, evtType)
+}
+
+// Recover loads non-terminal sessions from the State Store into memory.
+// It is called during bootstrap after the store is initialized.
+// Sessions are loaded with their last known status but do not emit events
+// (the events were already emitted when they occurred).
+func (cp *ControlPlane) Recover(ctx context.Context) error {
+	if cp.store == nil {
+		return nil
+	}
+	stored, err := cp.store.ListNonTerminalSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("recover sessions: %w", err)
+	}
+	cp.mu.Lock()
+	for _, s := range stored {
+		cp.sessions[s.ID] = &Session{
+			ID:        s.ID,
+			Status:    schemas.SessionStatus(s.Status),
+			TaskID:    s.TaskID,
+			CreatedAt: s.CreatedAt,
+			UpdatedAt: s.UpdatedAt,
+		}
+	}
+	cp.mu.Unlock()
+
+	if len(stored) > 0 {
+		log.Printf("controlplane: recovered %d non-terminal sessions", len(stored))
+	}
+	return nil
 }
 
 func (cp *ControlPlane) GetSession(sessionID string) (*Session, bool) {

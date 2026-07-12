@@ -62,7 +62,7 @@ func TestIntegration_CoordinatorWithRealDocker(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	defer func() { _ = bus.Close() }()
 
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := sandbox.NewDockerSandbox("alpine:latest")
 	adapters := []adapter.AgentAdapter{&echoAdapter{}}
@@ -129,7 +129,7 @@ func TestIntegration_CoordinatorWithRealDocker(t *testing.T) {
 	// The cleanup happens after the COMPLETED transition, so we need to poll.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		dockerPs := exec.Command("docker", "ps", "--filter", "name=foreman-", "--format", "{{.Names}}")
+		dockerPs := exec.Command("docker", "ps", "--filter", "name=foreman-sbox-", "--format", "{{.Names}}")
 		out, _ := dockerPs.Output()
 		if len(out) == 0 {
 			return // container cleaned up successfully
@@ -138,7 +138,7 @@ func TestIntegration_CoordinatorWithRealDocker(t *testing.T) {
 	}
 
 	// If we get here, the container is still running after 10s
-	dockerPs := exec.Command("docker", "ps", "--filter", "name=foreman-", "--format", "{{.Names}}")
+	dockerPs := exec.Command("docker", "ps", "--filter", "name=foreman-sbox-", "--format", "{{.Names}}")
 	out, _ := dockerPs.Output()
 	t.Errorf("expected no running foreman containers after cleanup, got: %s", string(out))
 }

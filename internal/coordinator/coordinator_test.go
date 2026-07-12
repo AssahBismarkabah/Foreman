@@ -70,7 +70,7 @@ func (m *mockSandbox) Destroy(ctx context.Context, sessionID string) error {
 func newTestCoordinator(t *testing.T) (*Coordinator, context.Context) {
 	t.Helper()
 	bus := eventbus.NewMemoryBus()
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
@@ -112,7 +112,7 @@ func TestSubmitTask(t *testing.T) {
 func TestSubmitTaskAdapterFailure(t *testing.T) {
 	// If the adapter fails, the session should go to FAILED.
 	bus := eventbus.NewMemoryBus()
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 
@@ -155,7 +155,7 @@ func (f *failBuildAdapter) CheckHealth(ctx context.Context) error { return nil }
 
 func TestSubmitTaskMaxConcurrent(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	co := New(bus, cp, sbox, hub, nil, 1)
@@ -176,7 +176,7 @@ func TestSubmitTaskMaxConcurrent(t *testing.T) {
 
 func TestCoordinatorAdapterScoping(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	adapters := []adapter.AgentAdapter{
@@ -204,7 +204,7 @@ func TestFullPipeline_EventsPublishedOnBus(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	defer func() { _ = bus.Close() }()
 
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
@@ -248,7 +248,7 @@ func TestFullPipeline_NonZeroExitCode(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	defer func() { _ = bus.Close() }()
 
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &failSandbox{exitCode: 42, stderr: "agent crashed"}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
@@ -267,7 +267,7 @@ func TestFullPipeline_SandboxProvisionFailure(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	defer func() { _ = bus.Close() }()
 
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &provisionFailSandbox{}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
@@ -286,7 +286,7 @@ func TestFullPipeline_VerifyFailure(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	defer func() { _ = bus.Close() }()
 
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	adapters := []adapter.AgentAdapter{&verifyFailAdapter{name: "test"}}
@@ -305,7 +305,7 @@ func TestFullPipeline_MultiLineOutput(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	defer func() { _ = bus.Close() }()
 
-	cp := controlplane.New(bus)
+	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &multiLineSandbox{stdout: "line one\nline two\nline three\n"}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}

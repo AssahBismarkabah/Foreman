@@ -1,0 +1,50 @@
+# Foreman Development Environment
+# Databases are created automatically by Foreman on startup
+# (EnsureDatabase in internal/statestore/postgres.go).
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: foreman-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${FOREMAN_PG_USER:-foreman}
+      POSTGRES_PASSWORD: ${FOREMAN_PG_PASSWORD:-foreman}
+      POSTGRES_DB: ${FOREMAN_PG_DATABASE:-foreman}
+    ports:
+      - "${FOREMAN_PG_PORT:-5432}:5432"
+    volumes:
+      - foreman-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${FOREMAN_PG_USER:-foreman}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    logging: *default-logging
+
+  # External NATS server (alternative to embedded mode).
+  nats:
+    profiles: ["nats"]
+    image: nats:2.10-alpine
+    container_name: foreman-nats
+    restart: unless-stopped
+    ports:
+      - "${FOREMAN_NATS_PORT:-4222}:4222"
+      - "${FOREMAN_NATS_HTTP_PORT:-8222}:8222"
+    command:
+      - "--jetstream"
+      - "--store_dir=/data"
+    volumes:
+      - foreman-nats-data:/data
+    logging: *default-logging
+
+volumes:
+  foreman-pg-data:
+  foreman-nats-data:

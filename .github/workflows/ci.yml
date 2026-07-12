@@ -24,6 +24,22 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: foreman
+          POSTGRES_PASSWORD: foreman
+          POSTGRES_DB: foreman_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -47,4 +63,8 @@ jobs:
         run: echo "$HOME/.opencode/bin" >> $GITHUB_PATH
 
       - run: make build
-      - run: make test
+
+      - name: Run tests
+        run: make test
+        env:
+          FOREMAN_TEST_DATABASE_URL: postgres://foreman:foreman@localhost:5432/foreman_test?sslmode=disable

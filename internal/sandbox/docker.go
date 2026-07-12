@@ -51,7 +51,7 @@ func (d *DockerSandbox) Provision(ctx context.Context, spec SandboxSpec) (string
 		return "", fmt.Errorf("no container image specified (set in config or SandboxSpec)")
 	}
 
-	sessionID := fmt.Sprintf("foreman-%d", time.Now().UnixNano())
+	sessionID := fmt.Sprintf("foreman-sbox-%d", time.Now().UnixNano())
 
 	args := []string{"run", "-d", "--name", sessionID}
 	if spec.Memory != "" {

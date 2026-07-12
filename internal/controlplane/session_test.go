@@ -11,7 +11,7 @@ import (
 func newTestCP(t *testing.T) (*ControlPlane, context.Context) {
 	t.Helper()
 	bus := eventbus.NewMemoryBus()
-	cp := New(bus)
+	cp := New(bus, nil)
 	return cp, context.Background()
 }
 
@@ -202,7 +202,7 @@ func TestEmit(t *testing.T) {
 	// Verify events are published on transitions.
 	// We use a MemoryBus and subscribe before each transition.
 	bus := eventbus.NewMemoryBus()
-	cp := New(bus)
+	cp := New(bus, nil)
 	ctx := context.Background()
 
 	received := make(chan schemas.Event, 10)

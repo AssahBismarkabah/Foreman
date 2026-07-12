@@ -14,6 +14,7 @@ type Config struct {
 
 type Subsystems struct {
 	EventBus    EventBusConfig    `yaml:"eventbus"`
+	StateStore  StateStoreConfig  `yaml:"statestore"`
 	Sandbox     SandboxConfig     `yaml:"sandbox"`
 	Coordinator CoordinatorConfig `yaml:"coordinator"`
 	Agents      []AgentConfig     `yaml:"agents"`
@@ -28,6 +29,13 @@ type EventBusConfig struct {
 type SandboxConfig struct {
 	Kind  string `yaml:"kind"` // "docker" | "gvisor" | "kata"
 	Image string `yaml:"image"`
+}
+
+type StateStoreConfig struct {
+	Kind     string `yaml:"kind"` // "postgres"
+	DSN      string `yaml:"dsn"`  // postgres://user:pass@host:port/dbname?sslmode=disable
+	MaxConns int32  `yaml:"max_connections"`
+	MinConns int32  `yaml:"min_connections"`
 }
 
 type CoordinatorConfig struct {

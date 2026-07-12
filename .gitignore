@@ -1,2 +1,4 @@
 .orchestrator/
 .idea/
+.env
+# Keep .env.example (committed template)
