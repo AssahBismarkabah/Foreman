@@ -48,6 +48,7 @@ type Coordinator struct {
 	backoffBase       time.Duration        // base delay for exponential backoff
 	backoffMultiplier float64              // multiplier per retry attempt
 	jitter            time.Duration        // random jitter added to backoff delay
+	accepting         bool
 	mu                sync.Mutex
 }
 
@@ -110,6 +111,42 @@ func New(
 		backoffBase:       backoffBase,
 		backoffMultiplier: backoffMultiplier,
 		jitter:            jitter,
+		accepting:         true,
+	}
+}
+
+// StopAccepting prevents new tasks from being submitted. Active tasks
+// continue running. This is the first phase of graceful shutdown.
+func (c *Coordinator) StopAccepting() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accepting = false
+}
+
+// ActiveCount returns the number of currently active task sessions.
+func (c *Coordinator) ActiveCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.active)
+}
+
+// Drain blocks until all active sessions have completed or the context is
+// cancelled. Returns the number of sessions still active when the context
+// expired (0 means all sessions completed). This is the second phase of
+// graceful shutdown.
+func (c *Coordinator) Drain(ctx context.Context) int {
+	for {
+		count := c.ActiveCount()
+		if count == 0 {
+			return 0
+		}
+		select {
+		case <-ctx.Done():
+			remaining := c.ActiveCount()
+			log.Printf("coordinator: drain timeout reached, %d session(s) still active", remaining)
+			return remaining
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 
@@ -127,6 +164,10 @@ func (c *Coordinator) SubmitTask(ctx context.Context, taskID, description string
 // The session must already exist in the ControlPlane (loaded by Recover).
 func (c *Coordinator) ResumeSession(ctx context.Context, sessionID, description string) error {
 	c.mu.Lock()
+	if !c.accepting {
+		c.mu.Unlock()
+		return fmt.Errorf("not accepting new tasks (shutting down)")
+	}
 	if len(c.active) >= c.maxConcurrent {
 		c.mu.Unlock()
 		return fmt.Errorf("max concurrent tasks reached (%d)", c.maxConcurrent)
@@ -154,6 +195,10 @@ func (c *Coordinator) ResumeSession(ctx context.Context, sessionID, description 
 // startTask transitions to ALLOCATING and launches the agent goroutine.
 func (c *Coordinator) startTask(ctx context.Context, sessionID, description string) error {
 	c.mu.Lock()
+	if !c.accepting {
+		c.mu.Unlock()
+		return fmt.Errorf("not accepting new tasks (shutting down)")
+	}
 	if len(c.active) >= c.maxConcurrent {
 		c.mu.Unlock()
 		return fmt.Errorf("max concurrent tasks reached (%d)", c.maxConcurrent)

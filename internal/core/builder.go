@@ -349,8 +349,31 @@ func newPlugins(cfg *config.Config) []plugins.Plugin {
 	return result
 }
 
-// Shutdown gracefully shuts down the app.
+// Shutdown gracefully shuts down the app with a 3-phase drain sequence:
+//
+//  1. StopAccepting -- prevent new tasks from being submitted
+//  2. Drain -- wait for active sessions to checkpoint or 30s timeout
+//  3. Cleanup -- stop plugins, API server, state store, event bus
 func (a *App) Shutdown(ctx context.Context) {
+	log.Println("shutdown: stopping new tasks")
+	if a.Coordinator != nil {
+		a.Coordinator.StopAccepting()
+	}
+
+	// Phase 2: drain active sessions with a dedicated timeout.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer drainCancel()
+
+	if a.Coordinator != nil {
+		remaining := a.Coordinator.Drain(drainCtx)
+		if remaining > 0 {
+			log.Printf("shutdown: %d session(s) still active after drain timeout", remaining)
+		} else {
+			log.Println("shutdown: all sessions drained")
+		}
+	}
+
+	// Phase 3: clean up subsystems.
 	for _, p := range a.Plugins {
 		if err := p.Stop(ctx); err != nil {
 			log.Printf("shutdown: plugin %s: stop: %v", p.Name(), err)
@@ -367,4 +390,5 @@ func (a *App) Shutdown(ctx context.Context) {
 	if err := a.EventBus.Close(); err != nil {
 		log.Printf("shutdown: eventbus close: %v", err)
 	}
+	log.Println("shutdown: complete")
 }
