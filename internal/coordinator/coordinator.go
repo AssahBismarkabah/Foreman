@@ -12,6 +12,7 @@ import (
 	"github.com/foreman/foreman/internal/adapter"
 	"github.com/foreman/foreman/internal/controlplane"
 	"github.com/foreman/foreman/internal/eventbus"
+	"github.com/foreman/foreman/internal/identity"
 	"github.com/foreman/foreman/internal/mcphub"
 	"github.com/foreman/foreman/internal/policy"
 	"github.com/foreman/foreman/internal/sandbox"
@@ -35,6 +36,7 @@ type Coordinator struct {
 	policies      []policy.Policy
 	maxConcurrent int
 	active        map[string]context.CancelFunc
+	tokenIssuer   *identity.Issuer // optional, for scoped agent tokens
 	mu            sync.Mutex
 }
 
@@ -47,6 +49,7 @@ func New(
 	adapters []adapter.AgentAdapter,
 	policies []policy.Policy,
 	maxConcurrent int,
+	tokenIssuer *identity.Issuer,
 ) *Coordinator {
 	adapterMap := make(map[string]adapter.AgentAdapter)
 	for _, a := range adapters {
@@ -61,6 +64,7 @@ func New(
 		policies:      policies,
 		maxConcurrent: maxConcurrent,
 		active:        make(map[string]context.CancelFunc),
+		tokenIssuer:   tokenIssuer,
 	}
 }
 
@@ -150,6 +154,10 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		return
 	}
 
+	c.cp.Audit(ctx, sessionID, "coordinator.adapter_selected", map[string]any{
+		"adapter": agent.Name(),
+	})
+
 	// --- Verify the adapter binary ---
 	if err := agent.Verify(ctx); err != nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("adapter verify: %w", err))
@@ -166,14 +174,34 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		return
 	}
 
+	// --- Generate scoped agent token (if issuer is configured) ---
+	env := map[string]string{}
+	if c.tokenIssuer != nil {
+		scope := &identity.AgentScope{
+			Actions: []string{"read", "pull"},
+		}
+		token, tokenErr := c.tokenIssuer.IssueScopedAgentToken(ctx, sessionID, "", 30*time.Minute, scope)
+		if tokenErr != nil {
+			c.failSession(ctx, sessionID, fmt.Errorf("issue scoped token: %w", tokenErr))
+			return
+		}
+		env["FOREMAN_AGENT_TOKEN"] = token
+	}
+
 	// --- Provision a sandbox ---
 	sandboxID, err := c.sbox.Provision(ctx, sandbox.SandboxSpec{
 		WorkDir: "/workspace",
+		Env:     env,
 	})
 	if err != nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("provision sandbox: %w", err))
 		return
 	}
+
+	c.cp.Audit(ctx, sessionID, "coordinator.sandbox_provisioned", map[string]any{
+		"sandbox_id": sandboxID,
+		"agent":      agent.Name(),
+	})
 
 	// --- Transition to RUNNING ---
 	if err := c.cp.Transition(ctx, sessionID, schemas.StatusRunning); err != nil {
@@ -269,6 +297,9 @@ func (c *Coordinator) Start(ctx context.Context) error {
 
 func (c *Coordinator) failSession(ctx context.Context, sessionID string, err error) {
 	log.Printf("coordinator: session %s failed: %v", sessionID, err)
+	c.cp.Audit(ctx, sessionID, "coordinator.session_failed", map[string]any{
+		"error": err.Error(),
+	})
 	if tErr := c.cp.Transition(ctx, sessionID, schemas.StatusFailed); tErr != nil {
 		log.Printf("coordinator: failed to mark session %s as failed: %v", sessionID, tErr)
 	}
@@ -363,6 +394,11 @@ func (c *Coordinator) publishApprovalRequest(ctx context.Context, sessionID stri
 		toolNames = append(toolNames, m.ToolUse.Tool)
 	}
 
+	c.cp.Audit(ctx, sessionID, "coordinator.approval_requested", map[string]any{
+		"tools":       toolNames,
+		"policy_name": matches[0].Policy.Name,
+	})
+
 	evt := schemas.Event{
 		ID:        fmt.Sprintf("approval-req-%s-%d", sessionID, time.Now().UnixNano()),
 		Type:      schemas.EvApprovalRequest,
@@ -422,10 +458,19 @@ func (c *Coordinator) waitForApproval(ctx context.Context, sessionID string, tim
 	case resp := <-respCh:
 		if resp.Approved {
 			log.Printf("coordinator: session %s approved by %s", sessionID, resp.UserID)
+			c.cp.Audit(ctx, sessionID, "coordinator.approval_granted", map[string]any{
+				"user_id": resp.UserID,
+			})
 			return nil
 		}
-		return fmt.Errorf("denied by %s", resp.UserID)
+		log.Printf("coordinator: session %s denied by %s: %s", sessionID, resp.UserID, resp.Reason)
+		c.cp.Audit(ctx, sessionID, "coordinator.approval_denied", map[string]any{
+			"user_id": resp.UserID,
+			"reason":  resp.Reason,
+		})
+		return fmt.Errorf("denied by %s: %s", resp.UserID, resp.Reason)
 	case <-time.After(timeout):
+		c.cp.Audit(ctx, sessionID, "coordinator.approval_timed_out", nil)
 		return fmt.Errorf("approval timed out after %v", timeout)
 	case <-ctx.Done():
 		return ctx.Err()

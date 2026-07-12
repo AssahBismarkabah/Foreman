@@ -40,8 +40,8 @@ Goal: Real chat interaction, approval gates, and identity.
 - [X] GitHub App integration -- client, installation store, webhook handler with signature verification
 - [X] API Server -- HTTP wrapper with health, JWKS, OIDC configuration, and webhook routes
 - [X] Builder wiring -- identity, API server, session recovery routing (RUNNING -> resume, APPROVAL -> cancel), plugin startup all wired in `internal/core/builder.go`
-- [ ] Scoped agent tokens
-- [ ] Audit trail persistence
+- [X] Scoped agent tokens -- AgentScope struct, structured claims, IssueScopedAgentToken, wired into coordinator (token in FOREMAN_AGENT_TOKEN env), default scope: read/pull
+- [X] Audit trail persistence -- audit_log SQL table, AuditEntry struct + AppendAuditEntry in StateStore, wired into controlplane (session created/transition) and coordinator (adapter selection, sandbox provision, failures, approval request/grant/deny/timeout)
 
 **Checkpoint:** User writes `/foreman fix this bug` in Slack, agent fixes it, creates PR, user approves via button in Slack, PR is created.
 
@@ -115,7 +115,7 @@ Tasks that fall outside the phase structure but are already done.
 - [X] MemoryBus wildcard matching (NATS-style * and > patterns)
 - [X] Coordinator wired to adapter + sandbox + MCP hub
 - [X] CI pipeline: parallel lint/test jobs, module caching, golangci-lint v2, opencode cache
-- [X] 229 tests across 17 packages (all passing, `go vet` clean, `go build` clean):
+- [X] 229 tests across 18 packages (all passing, `go vet` clean, `go build` clean, `golangci-lint` clean):
   - `internal/adapter` -- JSONL parsing, BuildConfig, Verify, StartCommand, InjectPrompt
   - `internal/api` -- server start/shutdown, route registration, health endpoint
   - `internal/config` -- valid YAML, minimal YAML, missing file, invalid YAML

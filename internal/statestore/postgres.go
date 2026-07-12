@@ -3,6 +3,7 @@ package statestore
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -205,6 +206,29 @@ func (s *postgresStore) ListNonTerminalSessions(ctx context.Context) ([]Session,
 		sessions = []Session{}
 	}
 	return sessions, nil
+}
+
+func (s *postgresStore) AppendAuditEntry(ctx context.Context, entry AuditEntry) error {
+	const q = `
+		INSERT INTO audit_log (session_id, user_id, action, target, metadata, created_at)
+		VALUES ($1, COALESCE(NULLIF($2, ''), ''), $3, COALESCE(NULLIF($4, ''), ''), $5, $6)
+	`
+	metaJSON := "{}"
+	if entry.Metadata != nil {
+		b, err := json.Marshal(entry.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal audit metadata: %w", err)
+		}
+		metaJSON = string(b)
+	}
+	_, err := s.pool.Exec(ctx, q,
+		entry.SessionID, entry.UserID, entry.Action,
+		entry.Target, metaJSON, entry.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("append audit entry: %w", err)
+	}
+	return nil
 }
 
 func (s *postgresStore) Ping(ctx context.Context) error {

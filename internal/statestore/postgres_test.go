@@ -210,6 +210,83 @@ func TestPostgresStore_GetSessionNotFound(t *testing.T) {
 	}
 }
 
+func TestPostgresStore_AppendAuditEntry(t *testing.T) {
+	skipNoPostgres(t)
+
+	ctx := context.Background()
+	store, err := NewPostgresStore(ctx, testDSN(), PoolConfig{})
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	defer store.Close()
+	ps := store.(*postgresStore)
+	defer cleanupSessions(t, ps)
+	defer cleanupAuditLog(t, ps)
+
+	// Need a session to exist for the FK constraint
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	sess := Session{
+		ID: "ses_audit_test", TaskID: "task_audit", Status: "CREATED",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	entry := AuditEntry{
+		SessionID: "ses_audit_test",
+		UserID:    "user_abc",
+		Action:    "session.created",
+		Target:    "ses_audit_test",
+		Metadata:  map[string]any{"task_id": "task_audit"},
+		CreatedAt: now,
+	}
+	if err := store.AppendAuditEntry(ctx, entry); err != nil {
+		t.Fatalf("AppendAuditEntry: %v", err)
+	}
+}
+
+func TestPostgresStore_AppendAuditEntryWithNilMetadata(t *testing.T) {
+	skipNoPostgres(t)
+
+	ctx := context.Background()
+	store, err := NewPostgresStore(ctx, testDSN(), PoolConfig{})
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	defer store.Close()
+	ps := store.(*postgresStore)
+	defer cleanupSessions(t, ps)
+	defer cleanupAuditLog(t, ps)
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	sess := Session{
+		ID: "ses_audit_nil", TaskID: "task_audit2", Status: "CREATED",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	entry := AuditEntry{
+		SessionID: "ses_audit_nil",
+		Action:    "session.completed",
+		CreatedAt: now,
+	}
+	if err := store.AppendAuditEntry(ctx, entry); err != nil {
+		t.Fatalf("AppendAuditEntry: %v", err)
+	}
+}
+
+func cleanupAuditLog(t *testing.T, store *postgresStore) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := store.pool.Exec(ctx, "DELETE FROM audit_log")
+	if err != nil {
+		t.Logf("cleanup audit_log: %v", err)
+	}
+}
+
 func TestPostgresStore_Ping(t *testing.T) {
 	skipNoPostgres(t)
 

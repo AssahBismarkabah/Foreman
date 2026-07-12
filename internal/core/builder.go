@@ -82,9 +82,10 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		return nil, fmt.Errorf("policies: %w", err)
 	}
 
-	co := coordinator.New(bus, cp, sbox, mcp, adapters, policies, cfg.Subsystems.Coordinator.MaxConcurrent)
+	iss := newIssuer(cfg)
+	co := coordinator.New(bus, cp, sbox, mcp, adapters, policies, cfg.Subsystems.Coordinator.MaxConcurrent, iss)
 
-	srv, err := newAPIServer(ctx, cfg, bus)
+	srv, err := newAPIServer(ctx, cfg, bus, iss)
 	if err != nil {
 		return nil, fmt.Errorf("api server: %w", err)
 	}
@@ -135,7 +136,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 }
 
 // newAPIServer creates the HTTP API server with identity/health/webhook routes.
-func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus) (*api.Server, error) {
+func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus, iss *identity.Issuer) (*api.Server, error) {
 	idCfg := cfg.Subsystems.Identity
 
 	// If no identity config is present, skip the API server.
@@ -155,14 +156,11 @@ func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus) 
 	srv.RegisterRoute("GET", "/healthz", healthHandler)
 
 	// Identity endpoints
-	km, err := identity.NewSigningKeyManager(idCfg.SigningKey)
-	if err != nil {
-		return nil, fmt.Errorf("signing key manager: %w", err)
+	if iss != nil {
+		srv.RegisterRoute("GET", "/.well-known/jwks.json", iss.JWKSHandler())
+		srv.RegisterRoute("GET", "/.well-known/openid-configuration",
+			iss.OIDCConfigurationHandler(idCfg.API.PublicURL))
 	}
-	iss := identity.NewIssuer(km, "foreman")
-	srv.RegisterRoute("GET", "/.well-known/jwks.json", iss.JWKSHandler())
-	srv.RegisterRoute("GET", "/.well-known/openid-configuration",
-		iss.OIDCConfigurationHandler(idCfg.API.PublicURL))
 
 	// GitHub App webhook
 	if idCfg.GitHubApp != nil {
@@ -237,6 +235,20 @@ func newAdapters(cfg *config.Config, bus eventbus.EventBus) []adapter.AgentAdapt
 		}
 	}
 	return result
+}
+
+// newIssuer creates the identity token issuer if identity config is present.
+func newIssuer(cfg *config.Config) *identity.Issuer {
+	idCfg := cfg.Subsystems.Identity
+	if (idCfg == identity.IdentityProviderConfig{}) {
+		return nil
+	}
+	km, err := identity.NewSigningKeyManager(idCfg.SigningKey)
+	if err != nil {
+		log.Printf("bootstrap: signing key manager: %v (token issuance disabled)", err)
+		return nil
+	}
+	return identity.NewIssuer(km, "foreman")
 }
 
 // newStateStore creates the state store based on config.

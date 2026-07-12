@@ -16,11 +16,11 @@ import (
 // AgentClaims represents the claims in an agent JWT token.
 type AgentClaims struct {
 	jwt.RegisteredClaims
-	AgentID   string   `json:"aid"`
-	SandboxID string   `json:"sid"`
-	SessionID string   `json:"ses"`
-	Identity  string   `json:"identity,omitempty"`
-	Scopes    []string `json:"scopes,omitempty"`
+	AgentID   string      `json:"aid"`
+	SandboxID string      `json:"sid"`
+	SessionID string      `json:"ses"`
+	Identity  string      `json:"identity,omitempty"`
+	Scope     *AgentScope `json:"scope,omitempty"`
 }
 
 // ServiceAccountClaims represents the claims in a service account JWT token.
@@ -78,6 +78,45 @@ func (iss *Issuer) IssueAgentToken(ctx context.Context, agent *Agent, sandboxID 
 	return signed, nil
 }
 
+// IssueScopedAgentToken creates a signed JWT for an agent with a structured
+// scope that limits its permissions (repos, actions, branches, etc.).
+// See architecture.md section 5.2.
+func (iss *Issuer) IssueScopedAgentToken(ctx context.Context, sessionID, userID string, ttl time.Duration, scope *AgentScope) (string, error) {
+	now := time.Now()
+	kid, err := iss.km.KeyID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("issuer: get key ID: %w", err)
+	}
+	key, err := iss.km.SigningKey(ctx)
+	if err != nil {
+		return "", fmt.Errorf("issuer: get signing key: %w", err)
+	}
+
+	claims := &AgentClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    iss.issuerID,
+			Subject:   fmt.Sprintf("agent-%s", sessionID),
+			Audience:  jwt.ClaimStrings{"github"},
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ID:        sessionID,
+		},
+		AgentID:   fmt.Sprintf("agent-%s", sessionID),
+		SessionID: sessionID,
+		Identity:  userID,
+		Scope:     scope,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = kid
+
+	signed, err := token.SignedString(key)
+	if err != nil {
+		return "", fmt.Errorf("issuer: sign scoped token: %w", err)
+	}
+	return signed, nil
+}
+
 // IssueServiceAccountToken creates a signed JWT for a service account.
 func (iss *Issuer) IssueServiceAccountToken(ctx context.Context, sa *ServiceAccount, ttl time.Duration) (string, error) {
 	now := time.Now()
@@ -115,13 +154,13 @@ func (iss *Issuer) IssueServiceAccountToken(ctx context.Context, sa *ServiceAcco
 // so we can parse once and determine the type after validation.
 type combinedClaims struct {
 	jwt.RegisteredClaims
-	AgentID          string   `json:"aid"`
-	SandboxID        string   `json:"sid"`
-	SessionID        string   `json:"ses"`
-	Identity         string   `json:"identity,omitempty"`
-	Scopes           []string `json:"scopes,omitempty"`
-	ServiceAccountID string   `json:"said,omitempty"`
-	Roles            []string `json:"roles,omitempty"`
+	AgentID          string      `json:"aid"`
+	SandboxID        string      `json:"sid"`
+	SessionID        string      `json:"ses"`
+	Identity         string      `json:"identity,omitempty"`
+	Scope            *AgentScope `json:"scope,omitempty"`
+	ServiceAccountID string      `json:"said,omitempty"`
+	Roles            []string    `json:"roles,omitempty"`
 }
 
 // ValidateToken parses and validates a JWT token, returning the Subject if valid.

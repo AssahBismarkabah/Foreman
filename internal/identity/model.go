@@ -46,6 +46,21 @@ type ServiceAccount struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// AgentScope defines the permissions granted to an agent token.
+// See architecture.md section 5.2 for the full specification.
+type AgentScope struct {
+	// Repos the agent is allowed to access (e.g. ["org/repo"]).
+	Repos []string `json:"repos,omitempty"`
+	// Actions the agent may perform: "read", "pull", "push", etc.
+	Actions []string `json:"actions,omitempty"`
+	// Branches the agent is restricted to (glob patterns, e.g. ["feature/*"]).
+	Branches []string `json:"branches,omitempty"`
+	// MaxPRs is the maximum number of pull requests the agent may create (0 = unlimited).
+	MaxPRs int `json:"max_prs,omitempty"`
+	// NoDelete prohibits destructive operations (branch/tag deletion).
+	NoDelete bool `json:"no_delete"`
+}
+
 // InstallationState represents the lifecycle state of a platform installation.
 type InstallationState string
 

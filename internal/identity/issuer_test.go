@@ -59,6 +59,56 @@ func TestIssuer_IssueAndValidateAgentToken(t *testing.T) {
 	}
 }
 
+func TestIssuer_IssueScopedAgentToken(t *testing.T) {
+	iss, _ := setupIssuer(t)
+	ctx := context.Background()
+
+	scope := &AgentScope{
+		Repos:    []string{"org/repo"},
+		Actions:  []string{"read", "pull", "push"},
+		Branches: []string{"feature/*"},
+		MaxPRs:   3,
+		NoDelete: true,
+	}
+	token, err := iss.IssueScopedAgentToken(ctx, "ses-1", "user-1", 5*time.Minute, scope)
+	if err != nil {
+		t.Fatalf("IssueScopedAgentToken: %v", err)
+	}
+	if token == "" {
+		t.Fatal("expected non-empty token")
+	}
+
+	// Scoped tokens have audience "github" (not "foreman"), so ValidateToken
+	// won't accept them. Parse claims directly to verify the structured scope.
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		return iss.km.VerificationKey(ctx)
+	}
+	parsed, err := jwt.ParseWithClaims(token, &combinedClaims{}, keyFunc)
+	if err != nil {
+		t.Fatalf("parse token: %v", err)
+	}
+	claims := parsed.Claims.(*combinedClaims)
+	if claims.Scope == nil {
+		t.Fatal("expected non-nil scope")
+	}
+	if len(claims.Scope.Repos) != 1 || claims.Scope.Repos[0] != "org/repo" {
+		t.Fatalf("unexpected repos: %v", claims.Scope.Repos)
+	}
+	if !claims.Scope.NoDelete {
+		t.Fatal("expected NoDelete=true")
+	}
+	if claims.Scope.MaxPRs != 3 {
+		t.Fatalf("expected MaxPRs=3, got %d", claims.Scope.MaxPRs)
+	}
+	// Verify regular claims
+	if claims.Subject != "agent-ses-1" {
+		t.Fatalf("expected subject 'agent-ses-1', got %q", claims.Subject)
+	}
+	if len(claims.Audience) != 1 || claims.Audience[0] != "github" {
+		t.Fatalf("expected audience [github], got %v", claims.Audience)
+	}
+}
+
 func TestIssuer_IssueAndValidateServiceAccountToken(t *testing.T) {
 	iss, _ := setupIssuer(t)
 	ctx := context.Background()
