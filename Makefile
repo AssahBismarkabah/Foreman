@@ -83,28 +83,30 @@ clean:
 
 # --- Docker Compose ---
 
+COMPOSE_FILE := deploy/docker-compose.yml
+
 up:
-	docker compose up -d
+	docker compose -f $(COMPOSE_FILE) up -d
 
 up-nats:
-	docker compose --profile nats up -d
+	docker compose -f $(COMPOSE_FILE) --profile nats up -d
 
 down:
-	docker compose down
+	docker compose -f $(COMPOSE_FILE) down
 
 reset: down
-	docker compose down -v
+	docker compose -f $(COMPOSE_FILE) down -v
 
 logs:
-	docker compose logs -f
+	docker compose -f $(COMPOSE_FILE) logs -f
 
 ps:
-	docker compose ps
+	docker compose -f $(COMPOSE_FILE) ps
 
 wait-db:
 	@echo "Waiting for PostgreSQL to be ready..."
 	@for i in $$(seq 1 20); do \
-		if docker compose exec -T postgres pg_isready -U ${FOREMAN_PG_USER:-foreman} > /dev/null 2>&1; then \
+		if docker compose -f $(COMPOSE_FILE) exec -T postgres pg_isready -U ${FOREMAN_PG_USER:-foreman} > /dev/null 2>&1; then \
 			echo "PostgreSQL is ready."; \
 			exit 0; \
 		fi; \

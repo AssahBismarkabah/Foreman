@@ -13,7 +13,7 @@ subsystems:
     # url: nats://localhost:4222
 
   # --- State Store (PostgreSQL) ---
-  # Start with: docker compose up -d
+  # Start with: make up (or: docker compose -f deploy/docker-compose.yml up -d)
   # The DSN can be overridden via the FOREMAN_PG_DSN env var or
   # the FOREMAN_PG_* individual env vars.
   statestore:
