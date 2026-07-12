@@ -13,8 +13,6 @@ a given task, provisions isolated Docker sandboxes, tracks session progress,
 gates destructive actions behind human approval, and reports results back to
 the channel. Agents do the work. Foreman makes sure it is done right.
 
-Foreman is hosted at [github.com/AssahBismarkabah/Foreman].
-
 ---
 
 ## To start using Foreman
