@@ -51,13 +51,16 @@ Goal: Real chat interaction, approval gates, and identity.
 
 Goal: Handle failures gracefully. Survive crashes. Retry smartly.
 
-- [ ] Checkpoint system (periodic state snapshots)
-- [ ] Agent crash detection + retry from checkpoint
-- [ ] Foreman crash recovery (reload in-flight sessions)
-- [ ] Retry policies with exponential backoff
-- [ ] Resource monitoring (CPU/memory/disk alerts)
+- [X] Checkpoint infrastructure -- migration (000004), struct, interface, postgres impl, tests
+- [X] Baseline checkpoint on agent start (coordinator runAgent)
+- [ ] Periodic heartbeat monitoring + agent crash detection
+- [ ] Retry from checkpoint with exponential backoff
+- [ ] Enhanced Foreman recovery (heartbeat age check, container reaper)
 - [ ] Graceful shutdown with drain
+- [ ] Resource monitoring (CPU/memory/disk alerts)
 - [ ] Integration tests for failure scenarios
+
+**Progress:** Phase A complete (checkpoint migration, storage, baseline capture). Next: Phase B -- heartbeat monitoring with goroutine per session + context cancellation for crash detection.
 
 **Checkpoint:** Kill the Foreman mid-task, restart, verify the agent resumes from checkpoint. Kill the agent container, verify it gets restarted.
 
@@ -115,7 +118,7 @@ Tasks that fall outside the phase structure but are already done.
 - [X] MemoryBus wildcard matching (NATS-style * and > patterns)
 - [X] Coordinator wired to adapter + sandbox + MCP hub
 - [X] CI pipeline: parallel lint/test jobs, module caching, golangci-lint v2, opencode cache
-- [X] 229 tests across 18 packages (all passing, `go vet` clean, `go build` clean, `golangci-lint` clean):
+- [X] 232 tests across 18 packages (all passing, `go vet` clean, `go build` clean, `golangci-lint` clean):
   - `internal/adapter` -- JSONL parsing, BuildConfig, Verify, StartCommand, InjectPrompt
   - `internal/api` -- server start/shutdown, route registration, health endpoint
   - `internal/config` -- valid YAML, minimal YAML, missing file, invalid YAML
@@ -132,4 +135,4 @@ Tasks that fall outside the phase structure but are already done.
   - `internal/policy` -- compile configs, timeout, tool glob, wildcard glob, input regex, input field match, catch-all, multiple policies
   - `internal/sandbox` -- provision+destroy, execute, write+read file, exit code, subscribe events, destroy nonexistent
   - `internal/schemas` -- Subject, SessionSubject, SessionEventSubject
-  - `internal/statestore` -- create+get, update status, list non-terminal, not found, ping, description field, migrations
+   - `internal/statestore` -- create+get, update status, list non-terminal, not found, ping, description field, migrations, audit append, checkpoint save/get (3 tests)

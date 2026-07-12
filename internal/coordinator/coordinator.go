@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -28,19 +31,29 @@ type ApprovalResponse struct {
 
 // Coordinator receives tasks, provisions sandboxes, and runs agents.
 type Coordinator struct {
-	bus           eventbus.EventBus
-	cp            *controlplane.ControlPlane
-	sbox          sandbox.Sandbox
-	mcpHub        mcphub.MCPHub
-	adapters      map[string]adapter.AgentAdapter
-	policies      []policy.Policy
-	maxConcurrent int
-	active        map[string]context.CancelFunc
-	tokenIssuer   *identity.Issuer // optional, for scoped agent tokens
-	mu            sync.Mutex
+	bus               eventbus.EventBus
+	cp                *controlplane.ControlPlane
+	sbox              sandbox.Sandbox
+	mcpHub            mcphub.MCPHub
+	adapters          map[string]adapter.AgentAdapter
+	policies          []policy.Policy
+	maxConcurrent     int
+	active            map[string]context.CancelFunc
+	tokenIssuer       *identity.Issuer     // optional, for scoped agent tokens
+	heartbeatInterval time.Duration        // how often to check sandbox liveness (0 = disabled)
+	heartbeatTimeout  time.Duration        // max interval without heartbeat before declaring crash
+	sessionHeartbeats map[string]time.Time // sessionID -> last successful heartbeat time
+	sessionAttempts   map[string]int       // sessionID -> current retry attempt count
+	maxRetries        int                  // max crash recovery retries
+	backoffBase       time.Duration        // base delay for exponential backoff
+	backoffMultiplier float64              // multiplier per retry attempt
+	jitter            time.Duration        // random jitter added to backoff delay
+	mu                sync.Mutex
 }
 
 // New creates a Coordinator.
+// heartbeatInterval and heartbeatTimeout control sandbox liveness monitoring.
+// Pass 0 for heartbeatInterval to disable monitoring.
 func New(
 	bus eventbus.EventBus,
 	cp *controlplane.ControlPlane,
@@ -50,21 +63,53 @@ func New(
 	policies []policy.Policy,
 	maxConcurrent int,
 	tokenIssuer *identity.Issuer,
+	heartbeatInterval time.Duration,
+	heartbeatTimeout time.Duration,
+	maxRetries int,
+	backoffBase time.Duration,
+	backoffMultiplier float64,
+	jitter time.Duration,
 ) *Coordinator {
 	adapterMap := make(map[string]adapter.AgentAdapter)
 	for _, a := range adapters {
 		adapterMap[a.Name()] = a
 	}
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = 0 // disabled
+	}
+	if heartbeatTimeout <= 0 {
+		heartbeatTimeout = 60 * time.Second // default
+	}
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	if backoffBase <= 0 {
+		backoffBase = 5 * time.Second
+	}
+	if backoffMultiplier <= 0 {
+		backoffMultiplier = 2.0
+	}
+	if jitter <= 0 {
+		jitter = 1 * time.Second
+	}
 	return &Coordinator{
-		bus:           bus,
-		cp:            cp,
-		sbox:          sbox,
-		mcpHub:        mcpHub,
-		adapters:      adapterMap,
-		policies:      policies,
-		maxConcurrent: maxConcurrent,
-		active:        make(map[string]context.CancelFunc),
-		tokenIssuer:   tokenIssuer,
+		bus:               bus,
+		cp:                cp,
+		sbox:              sbox,
+		mcpHub:            mcpHub,
+		adapters:          adapterMap,
+		policies:          policies,
+		maxConcurrent:     maxConcurrent,
+		active:            make(map[string]context.CancelFunc),
+		tokenIssuer:       tokenIssuer,
+		heartbeatInterval: heartbeatInterval,
+		heartbeatTimeout:  heartbeatTimeout,
+		sessionHeartbeats: make(map[string]time.Time),
+		sessionAttempts:   make(map[string]int),
+		maxRetries:        maxRetries,
+		backoffBase:       backoffBase,
+		backoffMultiplier: backoffMultiplier,
+		jitter:            jitter,
 	}
 }
 
@@ -210,10 +255,48 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		return
 	}
 
+	// --- Save baseline checkpoint ---
+	baselineSnapshot, _ := json.Marshal(map[string]any{
+		"session_id":  sessionID,
+		"description": description,
+		"sandbox_id":  sandboxID,
+		"step":        "allocated",
+		"agent":       agent.Name(),
+	})
+	if _, cpErr := c.cp.SaveCheckpoint(ctx, sessionID, baselineSnapshot); cpErr != nil {
+		log.Printf("coordinator: save baseline checkpoint: %v", cpErr)
+		// Non-fatal -- continue even if checkpoint fails
+	}
+
+	// --- Start heartbeat monitor (if enabled) ---
+	heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
+	defer heartbeatCancel()
+
+	crashCh := make(chan error, 1)
+	if c.heartbeatInterval > 0 {
+		go c.monitorHeartbeat(heartbeatCtx, sessionID, sandboxID, crashCh)
+	}
+
 	// --- Execute the agent in the sandbox ---
-	result, err := c.sbox.Execute(ctx, sandboxID, args, 0)
-	if err != nil {
-		c.failSession(ctx, sessionID, fmt.Errorf("execute agent: %w", err))
+	// The heartbeat monitor can cancel heartbeatCtx to interrupt the agent
+	// if the sandbox stops responding.
+	result, execErr := c.sbox.Execute(heartbeatCtx, sandboxID, args, 0)
+
+	// Check if execution was interrupted by heartbeat failure.
+	select {
+	case hbErr := <-crashCh:
+		c.cp.Audit(ctx, sessionID, "coordinator.agent_crashed", map[string]any{
+			"error": hbErr.Error(),
+		})
+		if c.handleCrash(ctx, sessionID, description, sandboxID, hbErr) {
+			return // retry launched in new goroutine
+		}
+		return // retries exhausted
+	default:
+	}
+
+	if execErr != nil {
+		c.failSession(ctx, sessionID, fmt.Errorf("execute agent: %w", execErr))
 		c.cleanupSandbox(ctx, sandboxID)
 		return
 	}
@@ -291,6 +374,142 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	defer cancel()
 	<-ctx.Done()
 	return nil
+}
+
+// monitorHeartbeat runs in a goroutine per active session. It calls
+// sbox.Heartbeat on every tick. After heartbeatTimeout worth of consecutive
+// failures it sends the error to crashCh, which should cancel the execute
+// context. Returns immediately if heartbeat monitoring is disabled.
+func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID string, crashCh chan<- error) {
+	if c.heartbeatInterval <= 0 {
+		return
+	}
+
+	interval := c.heartbeatInterval
+	maxFailures := int(c.heartbeatTimeout / interval)
+	if maxFailures < 1 {
+		maxFailures = 3
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	consecutiveFailures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := c.sbox.Heartbeat(ctx, sandboxID); err != nil {
+				consecutiveFailures++
+				log.Printf("coordinator: heartbeat %d/%d failed for session %s: %v",
+					consecutiveFailures, maxFailures, sessionID, err)
+				if consecutiveFailures >= maxFailures {
+					select {
+					case crashCh <- fmt.Errorf("heartbeat lost after %d failures: %w", consecutiveFailures, err):
+					default:
+					}
+					return
+				}
+			} else {
+				consecutiveFailures = 0
+				c.mu.Lock()
+				c.sessionHeartbeats[sessionID] = time.Now()
+				c.mu.Unlock()
+			}
+		}
+	}
+}
+
+// backoffDuration computes the delay before a retry attempt using
+// exponential backoff with jitter: base * multiplier^attempt + rand(jitter).
+func (c *Coordinator) backoffDuration(attempt int) time.Duration {
+	base := float64(c.backoffBase)
+	delay := base * math.Pow(c.backoffMultiplier, float64(attempt-1))
+	jitter := time.Duration(rand.Int63n(int64(c.jitter)))
+	return time.Duration(delay) + jitter
+}
+
+// handleCrash is called when heartbeat monitoring detects a sandbox crash.
+// It saves a crash checkpoint, cleans up the dead sandbox, and either
+// retries with exponential backoff (returning true) or fails the session
+// when retries are exhausted (returning false).
+func (c *Coordinator) handleCrash(ctx context.Context, sessionID, description, sandboxID string, crashErr error) bool {
+	c.mu.Lock()
+	c.sessionAttempts[sessionID]++
+	attempt := c.sessionAttempts[sessionID]
+	c.mu.Unlock()
+
+	// Save crash checkpoint.
+	crashSnapshot, _ := json.Marshal(map[string]any{
+		"session_id": sessionID,
+		"step":       "crashed",
+		"error":      crashErr.Error(),
+		"attempt":    attempt,
+	})
+	if _, cpErr := c.cp.SaveCheckpoint(ctx, sessionID, crashSnapshot); cpErr != nil {
+		log.Printf("coordinator: save crash checkpoint: %v", cpErr)
+	}
+
+	// Clean up the dead sandbox.
+	c.cleanupSandbox(ctx, sandboxID)
+
+	if attempt > c.maxRetries {
+		c.cp.Audit(ctx, sessionID, "coordinator.retries_exhausted", map[string]any{
+			"error":   crashErr.Error(),
+			"attempt": attempt,
+		})
+		c.failSession(ctx, sessionID, fmt.Errorf("agent crashed, retries exhausted after %d attempts: %w", attempt, crashErr))
+		return false
+	}
+
+	// Exponential backoff with jitter.
+	delay := c.backoffDuration(attempt)
+	log.Printf("coordinator: session %s crashed (attempt %d/%d), retrying in %v",
+		sessionID, attempt, c.maxRetries, delay)
+
+	c.cp.Audit(ctx, sessionID, "coordinator.agent_retrying", map[string]any{
+		"attempt": attempt,
+		"delay":   delay.String(),
+	})
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(delay):
+	}
+
+	// Retry in a new goroutine with the same context (cancellation chain intact).
+	go c.runAgent(ctx, sessionID, description)
+	return true
+}
+
+// ReapOrphanedContainers removes any Docker containers left behind by a previous
+// Foreman instance. It lists all containers with the foreman-sbox- prefix and
+// destroys those whose session IDs are not in the provided active set.
+// Call this on bootstrap before starting new sessions.
+func (c *Coordinator) ReapOrphanedContainers(ctx context.Context, activeSessions map[string]bool) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
+		"--filter", "name=foreman-sbox-",
+		"--format", "{{.Names}}")
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("coordinator: list containers for reaping: %v", err)
+		return
+	}
+	for _, name := range strings.Fields(string(out)) {
+		if name == "" {
+			continue
+		}
+		// Skip containers that belong to active sessions.
+		if activeSessions[name] {
+			continue
+		}
+		log.Printf("coordinator: reaping orphaned container %s", name)
+		if dErr := c.sbox.Destroy(ctx, name); dErr != nil {
+			log.Printf("coordinator: reap container %s: %v", name, dErr)
+		}
+	}
 }
 
 // --- helpers ---

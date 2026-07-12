@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -40,13 +41,14 @@ var validTransitions = map[schemas.SessionStatus][]schemas.SessionStatus{
 }
 
 type Session struct {
-	ID          string
-	Status      schemas.SessionStatus
-	TaskID      string
-	Description string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	mu          sync.RWMutex
+	ID            string
+	Status        schemas.SessionStatus
+	TaskID        string
+	Description   string
+	CheckpointRef int64 // latest checkpoint ID, 0 = none
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	mu            sync.RWMutex
 }
 
 type ControlPlane struct {
@@ -191,6 +193,47 @@ func (cp *ControlPlane) Recover(ctx context.Context) ([]statestore.Session, erro
 		log.Printf("controlplane: recovered %d non-terminal sessions", len(stored))
 	}
 	return stored, nil
+}
+
+// SaveCheckpoint persists a checkpoint snapshot and updates the session's
+// checkpoint_ref. No-op if the store is nil (memory-only mode).
+func (cp *ControlPlane) SaveCheckpoint(ctx context.Context, sessionID string, snapshot json.RawMessage) (int64, error) {
+	if cp.store == nil {
+		return 0, nil
+	}
+	now := time.Now()
+	cp.mu.RLock()
+	s, ok := cp.sessions[sessionID]
+	cp.mu.RUnlock()
+	if !ok {
+		return 0, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	s.mu.RLock()
+	step := 0 // will be replaced with step tracking in Phase B
+	s.mu.RUnlock()
+
+	id, err := cp.store.SaveCheckpoint(ctx, statestore.Checkpoint{
+		SessionID:  sessionID,
+		Snapshot:   snapshot,
+		StepNumber: step,
+		CreatedAt:  now,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("save checkpoint: %w", err)
+	}
+	if err := cp.store.UpdateCheckpointRef(ctx, sessionID, id); err != nil {
+		return id, fmt.Errorf("update checkpoint ref: %w", err)
+	}
+
+	// Update in-memory session
+	cp.mu.Lock()
+	if s, ok := cp.sessions[sessionID]; ok {
+		s.CheckpointRef = id
+	}
+	cp.mu.Unlock()
+
+	return id, nil
 }
 
 func (cp *ControlPlane) GetSession(sessionID string) (*Session, bool) {

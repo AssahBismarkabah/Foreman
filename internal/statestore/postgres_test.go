@@ -2,6 +2,8 @@ package statestore
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -284,6 +286,152 @@ func cleanupAuditLog(t *testing.T, store *postgresStore) {
 	_, err := store.pool.Exec(ctx, "DELETE FROM audit_log")
 	if err != nil {
 		t.Logf("cleanup audit_log: %v", err)
+	}
+}
+
+func TestPostgresStore_SaveAndGetCheckpoint(t *testing.T) {
+	skipNoPostgres(t)
+
+	ctx := context.Background()
+	store, err := NewPostgresStore(ctx, testDSN(), PoolConfig{})
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	defer store.Close()
+	ps := store.(*postgresStore)
+	defer cleanupSessions(t, ps)
+	defer cleanupCheckpoints(t, ps)
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	sess := Session{
+		ID: "ses_cp_test", TaskID: "task_cp", Status: "RUNNING",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	cp := Checkpoint{
+		SessionID:  "ses_cp_test",
+		Snapshot:   json.RawMessage(`{"files":["main.go"],"branch":"feature"}`),
+		StepNumber: 1,
+		CreatedAt:  now,
+	}
+	id, err := store.SaveCheckpoint(ctx, cp)
+	if err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	if id <= 0 {
+		t.Fatalf("expected positive checkpoint ID, got %d", id)
+	}
+
+	// Update checkpoint ref
+	if err := store.UpdateCheckpointRef(ctx, "ses_cp_test", id); err != nil {
+		t.Fatalf("UpdateCheckpointRef: %v", err)
+	}
+
+	// Verify checkpoint_ref on the session
+	updated, err := store.GetSession(ctx, "ses_cp_test")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if updated.CheckpointRef != fmt.Sprintf("%d", id) {
+		t.Errorf("CheckpointRef = %q, want %q", updated.CheckpointRef, fmt.Sprintf("%d", id))
+	}
+
+	// Retrieve last checkpoint
+	last, err := store.LastCheckpoint(ctx, "ses_cp_test")
+	if err != nil {
+		t.Fatalf("LastCheckpoint: %v", err)
+	}
+	if last == nil {
+		t.Fatal("expected checkpoint, got nil")
+	}
+	if last.SessionID != "ses_cp_test" {
+		t.Errorf("SessionID = %q, want %q", last.SessionID, "ses_cp_test")
+	}
+	if last.StepNumber != 1 {
+		t.Errorf("StepNumber = %d, want 1", last.StepNumber)
+	}
+}
+
+func TestPostgresStore_CheckpointMultipleSteps(t *testing.T) {
+	skipNoPostgres(t)
+
+	ctx := context.Background()
+	store, err := NewPostgresStore(ctx, testDSN(), PoolConfig{})
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	defer store.Close()
+	ps := store.(*postgresStore)
+	defer cleanupSessions(t, ps)
+	defer cleanupCheckpoints(t, ps)
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	sess := Session{
+		ID: "ses_cp_multi", TaskID: "task_cp2", Status: "RUNNING",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Save checkpoints at steps 1, 2, 3
+	for step := 1; step <= 3; step++ {
+		cp := Checkpoint{
+			SessionID:  "ses_cp_multi",
+			Snapshot:   json.RawMessage(`{"step":` + fmt.Sprintf("%d", step) + `}`),
+			StepNumber: step,
+			CreatedAt:  now.Add(time.Duration(step) * time.Second),
+		}
+		id, err := store.SaveCheckpoint(ctx, cp)
+		if err != nil {
+			t.Fatalf("SaveCheckpoint step %d: %v", step, err)
+		}
+		if id <= 0 {
+			t.Fatalf("expected positive ID at step %d", step)
+		}
+	}
+
+	// Last should be step 3
+	last, err := store.LastCheckpoint(ctx, "ses_cp_multi")
+	if err != nil {
+		t.Fatalf("LastCheckpoint: %v", err)
+	}
+	if last == nil {
+		t.Fatal("expected checkpoint, got nil")
+	}
+	if last.StepNumber != 3 {
+		t.Errorf("Expected step 3, got %d", last.StepNumber)
+	}
+}
+
+func TestPostgresStore_LastCheckpointNonexistent(t *testing.T) {
+	skipNoPostgres(t)
+
+	ctx := context.Background()
+	store, err := NewPostgresStore(ctx, testDSN(), PoolConfig{})
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	defer store.Close()
+
+	last, err := store.LastCheckpoint(ctx, "ses_nonexistent")
+	if err != nil {
+		t.Fatalf("LastCheckpoint: %v", err)
+	}
+	if last != nil {
+		t.Fatal("expected nil for nonexistent session, got checkpoint")
+	}
+}
+
+func cleanupCheckpoints(t *testing.T, store *postgresStore) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := store.pool.Exec(ctx, "DELETE FROM checkpoints")
+	if err != nil {
+		t.Logf("cleanup checkpoints: %v", err)
 	}
 }
 

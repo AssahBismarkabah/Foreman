@@ -231,6 +231,60 @@ func (s *postgresStore) AppendAuditEntry(ctx context.Context, entry AuditEntry) 
 	return nil
 }
 
+func (s *postgresStore) SaveCheckpoint(ctx context.Context, cp Checkpoint) (int64, error) {
+	const q = `
+		INSERT INTO checkpoints (session_id, snapshot, step_number, created_at)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`
+	snapshotJSON := "{}"
+	if cp.Snapshot != nil {
+		snapshotJSON = string(cp.Snapshot)
+	}
+	var id int64
+	err := s.pool.QueryRow(ctx, q,
+		cp.SessionID, snapshotJSON, cp.StepNumber, cp.CreatedAt,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("save checkpoint: %w", err)
+	}
+	return id, nil
+}
+
+func (s *postgresStore) LastCheckpoint(ctx context.Context, sessionID string) (*Checkpoint, error) {
+	const q = `
+		SELECT id, session_id, snapshot, step_number, created_at
+		FROM checkpoints
+		WHERE session_id = $1
+		ORDER BY step_number DESC, id DESC
+		LIMIT 1
+	`
+	row := s.pool.QueryRow(ctx, q, sessionID)
+	var cp Checkpoint
+	var snapshotStr string
+	err := row.Scan(&cp.ID, &cp.SessionID, &snapshotStr, &cp.StepNumber, &cp.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("last checkpoint: %w", err)
+	}
+	cp.Snapshot = json.RawMessage(snapshotStr)
+	return &cp, nil
+}
+
+func (s *postgresStore) UpdateCheckpointRef(ctx context.Context, sessionID string, checkpointID int64) error {
+	const q = `UPDATE sessions SET checkpoint_ref = $2 WHERE id = $1`
+	tag, err := s.pool.Exec(ctx, q, sessionID, fmt.Sprintf("%d", checkpointID))
+	if err != nil {
+		return fmt.Errorf("update checkpoint ref: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("session %q not found", sessionID)
+	}
+	return nil
+}
+
 func (s *postgresStore) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/foreman/foreman/internal/adapter"
 	"github.com/foreman/foreman/internal/api"
@@ -83,7 +84,23 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	}
 
 	iss := newIssuer(cfg)
-	co := coordinator.New(bus, cp, sbox, mcp, adapters, policies, cfg.Subsystems.Coordinator.MaxConcurrent, iss)
+	co := coordinator.New(
+		bus, cp, sbox, mcp, adapters, policies,
+		cfg.Subsystems.Coordinator.MaxConcurrent, iss,
+		cfg.Subsystems.Coordinator.HeartbeatInterval,
+		cfg.Subsystems.Coordinator.HeartbeatTimeout,
+		cfg.Subsystems.Coordinator.MaxRetries,
+		cfg.Subsystems.Coordinator.BackoffBase,
+		cfg.Subsystems.Coordinator.BackoffMultiplier,
+		cfg.Subsystems.Coordinator.Jitter,
+	)
+
+	// Reap orphaned Docker containers from previous runs.
+	activeSessions := make(map[string]bool, len(recovered))
+	for _, s := range recovered {
+		activeSessions[s.ID] = true
+	}
+	co.ReapOrphanedContainers(ctx, activeSessions)
 
 	srv, err := newAPIServer(ctx, cfg, bus, iss)
 	if err != nil {
@@ -96,18 +113,45 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		log.Printf("bootstrap: api server listening on %s", cfg.Subsystems.Identity.API.ListenAddr)
 	}
 
-	// Resume RUNNING sessions; cancel orphaned APPROVAL sessions.
+	// Recover non-terminal sessions with heartbeat age awareness.
+	// ALLOCATING sessions never completed provisioning -> fail.
+	// RUNNING sessions with recent heartbeat -> resume; stale -> fail.
+	// APPROVAL sessions were orphaned -> cancel.
+	heartbeatTimeout := cfg.Subsystems.Coordinator.HeartbeatTimeout
+	if heartbeatTimeout <= 0 {
+		heartbeatTimeout = 90 * time.Second
+	}
 	for _, s := range recovered {
 		switch s.Status {
+		case string(schemas.StatusAllocating):
+			log.Printf("bootstrap: failing incomplete allocation session %s", s.ID)
+			_ = cp.Transition(ctx, s.ID, schemas.StatusFailed)
+			cp.Audit(ctx, s.ID, "recovery.allocating_session_failed", map[string]any{
+				"reason": "allocation never completed before restart",
+			})
 		case string(schemas.StatusRunning):
-			log.Printf("bootstrap: resuming session %s", s.ID)
-			if err := co.ResumeSession(ctx, s.ID, s.Description); err != nil {
-				log.Printf("bootstrap: resume session %s: %v", s.ID, err)
+			age := time.Since(s.UpdatedAt)
+			if age > heartbeatTimeout {
+				log.Printf("bootstrap: failing stale running session %s (age %v > timeout %v)", s.ID, age, heartbeatTimeout)
+				_ = cp.Transition(ctx, s.ID, schemas.StatusFailed)
+				cp.Audit(ctx, s.ID, "recovery.stale_session_failed", map[string]any{
+					"age_seconds": age.Seconds(),
+					"timeout":     heartbeatTimeout.Seconds(),
+				})
+			} else {
+				log.Printf("bootstrap: resuming session %s (age %v)", s.ID, age)
+				if err := co.ResumeSession(ctx, s.ID, s.Description); err != nil {
+					log.Printf("bootstrap: resume session %s: %v", s.ID, err)
+				}
 			}
 		case string(schemas.StatusApproval):
 			// Approval request was lost in the crash. Cancel it.
 			log.Printf("bootstrap: cancelling orphaned approval session %s", s.ID)
 			_ = cp.Transition(ctx, s.ID, schemas.StatusCancelling)
+			_ = cp.Transition(ctx, s.ID, schemas.StatusFailed)
+			cp.Audit(ctx, s.ID, "recovery.orphaned_approval_cancelled", nil)
+		case string(schemas.StatusCancelling):
+			log.Printf("bootstrap: completing cancelled session %s", s.ID)
 			_ = cp.Transition(ctx, s.ID, schemas.StatusFailed)
 		default:
 			log.Printf("bootstrap: leaving session %s in state %s (no auto-resume)", s.ID, s.Status)

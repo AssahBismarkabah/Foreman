@@ -43,9 +43,15 @@ type StateStoreConfig struct {
 }
 
 type CoordinatorConfig struct {
-	MaxConcurrent  int            `yaml:"max_concurrent"`
-	DefaultTimeout time.Duration  `yaml:"default_timeout"`
-	Policies       []PolicyConfig `yaml:"policies"`
+	MaxConcurrent     int            `yaml:"max_concurrent"`
+	DefaultTimeout    time.Duration  `yaml:"default_timeout"`
+	HeartbeatInterval time.Duration  `yaml:"heartbeat_interval"` // how often to check sandbox liveness
+	HeartbeatTimeout  time.Duration  `yaml:"heartbeat_timeout"`  // max time without heartbeat before crash declared
+	MaxRetries        int            `yaml:"max_retries"`        // max crash recovery retries (default 3)
+	BackoffBase       time.Duration  `yaml:"backoff_base"`       // base delay for exponential backoff (default 5s)
+	BackoffMultiplier float64        `yaml:"backoff_multiplier"` // multiplier per attempt (default 2.0)
+	Jitter            time.Duration  `yaml:"jitter"`             // random jitter added to backoff (default 1s)
+	Policies          []PolicyConfig `yaml:"policies"`
 }
 
 type PolicyConfig struct {
