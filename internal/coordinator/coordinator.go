@@ -67,10 +67,39 @@ func New(
 // SubmitTask creates a session and starts running the task asynchronously.
 func (c *Coordinator) SubmitTask(ctx context.Context, taskID, description string) error {
 	sessionID := fmt.Sprintf("ses_%s", taskID)
-	if err := c.cp.CreateSession(ctx, sessionID, taskID); err != nil {
+	if err := c.cp.CreateSession(ctx, sessionID, taskID, description); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	return c.startTask(ctx, sessionID, description)
+}
+
+// ResumeSession restarts a session that was recovered after a restart.
+// It transitions the session back to ALLOCATING and launches a new agent.
+// The session must already exist in the ControlPlane (loaded by Recover).
+func (c *Coordinator) ResumeSession(ctx context.Context, sessionID, description string) error {
+	c.mu.Lock()
+	if len(c.active) >= c.maxConcurrent {
+		c.mu.Unlock()
+		return fmt.Errorf("max concurrent tasks reached (%d)", c.maxConcurrent)
+	}
+	c.mu.Unlock()
+
+	if err := c.cp.Transition(ctx, sessionID, schemas.StatusAllocating); err != nil {
+		return fmt.Errorf("transition to allocating: %w", err)
+	}
+
+	if _, err := c.mcpHub.ResolveTools(ctx, sessionID); err != nil {
+		c.failSession(ctx, sessionID, fmt.Errorf("resolve tools: %w", err))
+		return fmt.Errorf("resolve tools: %w", err)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	c.active[sessionID] = cancel
+	c.mu.Unlock()
+
+	go c.runAgent(runCtx, sessionID, description)
+	return nil
 }
 
 // startTask transitions to ALLOCATING and launches the agent goroutine.

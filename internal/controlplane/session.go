@@ -21,12 +21,13 @@ var validTransitions = map[schemas.SessionStatus][]schemas.SessionStatus{
 }
 
 type Session struct {
-	ID        string
-	Status    schemas.SessionStatus
-	TaskID    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	mu        sync.RWMutex
+	ID          string
+	Status      schemas.SessionStatus
+	TaskID      string
+	Description string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	mu          sync.RWMutex
 }
 
 type ControlPlane struct {
@@ -44,23 +45,25 @@ func New(bus eventbus.EventBus, store statestore.StateStore) *ControlPlane {
 	}
 }
 
-func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID string) error {
+func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID, description string) error {
 	s := &Session{
-		ID:        sessionID,
-		Status:    schemas.StatusCreated,
-		TaskID:    taskID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:          sessionID,
+		Status:      schemas.StatusCreated,
+		TaskID:      taskID,
+		Description: description,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	// Persist to StateStore first so a failure prevents the in-memory write.
 	if cp.store != nil {
 		if err := cp.store.CreateSession(ctx, statestore.Session{
-			ID:        s.ID,
-			TaskID:    s.TaskID,
-			Status:    string(s.Status),
-			CreatedAt: s.CreatedAt,
-			UpdatedAt: s.UpdatedAt,
+			ID:          s.ID,
+			TaskID:      s.TaskID,
+			Description: s.Description,
+			Status:      string(s.Status),
+			CreatedAt:   s.CreatedAt,
+			UpdatedAt:   s.UpdatedAt,
 		}); err != nil {
 			return fmt.Errorf("store create session: %w", err)
 		}
@@ -131,22 +134,24 @@ func (cp *ControlPlane) Transition(ctx context.Context, sessionID string, to sch
 // It is called during bootstrap after the store is initialized.
 // Sessions are loaded with their last known status but do not emit events
 // (the events were already emitted when they occurred).
-func (cp *ControlPlane) Recover(ctx context.Context) error {
+// Returns the recovered sessions so callers can resume them via the coordinator.
+func (cp *ControlPlane) Recover(ctx context.Context) ([]statestore.Session, error) {
 	if cp.store == nil {
-		return nil
+		return nil, nil
 	}
 	stored, err := cp.store.ListNonTerminalSessions(ctx)
 	if err != nil {
-		return fmt.Errorf("recover sessions: %w", err)
+		return nil, fmt.Errorf("recover sessions: %w", err)
 	}
 	cp.mu.Lock()
 	for _, s := range stored {
 		cp.sessions[s.ID] = &Session{
-			ID:        s.ID,
-			Status:    schemas.SessionStatus(s.Status),
-			TaskID:    s.TaskID,
-			CreatedAt: s.CreatedAt,
-			UpdatedAt: s.UpdatedAt,
+			ID:          s.ID,
+			Status:      schemas.SessionStatus(s.Status),
+			TaskID:      s.TaskID,
+			Description: s.Description,
+			CreatedAt:   s.CreatedAt,
+			UpdatedAt:   s.UpdatedAt,
 		}
 	}
 	cp.mu.Unlock()
@@ -154,7 +159,7 @@ func (cp *ControlPlane) Recover(ctx context.Context) error {
 	if len(stored) > 0 {
 		log.Printf("controlplane: recovered %d non-terminal sessions", len(stored))
 	}
-	return nil
+	return stored, nil
 }
 
 func (cp *ControlPlane) GetSession(sessionID string) (*Session, bool) {

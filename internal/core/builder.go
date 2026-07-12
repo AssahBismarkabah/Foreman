@@ -16,6 +16,7 @@ import (
 	"github.com/foreman/foreman/internal/plugins/slack"
 	"github.com/foreman/foreman/internal/policy"
 	"github.com/foreman/foreman/internal/sandbox"
+	"github.com/foreman/foreman/internal/schemas"
 	"github.com/foreman/foreman/internal/statestore"
 )
 
@@ -64,7 +65,8 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	cp := controlplane.New(bus, store)
 
 	// Recover non-terminal sessions from the State Store.
-	if err := cp.Recover(ctx); err != nil {
+	recovered, err := cp.Recover(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("recover sessions: %w", err)
 	}
 
@@ -76,6 +78,24 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	}
 
 	co := coordinator.New(bus, cp, sbox, mcp, adapters, policies, cfg.Subsystems.Coordinator.MaxConcurrent)
+
+	// Resume RUNNING sessions; cancel orphaned APPROVAL sessions.
+	for _, s := range recovered {
+		switch s.Status {
+		case string(schemas.StatusRunning):
+			log.Printf("bootstrap: resuming session %s", s.ID)
+			if err := co.ResumeSession(ctx, s.ID, s.Description); err != nil {
+				log.Printf("bootstrap: resume session %s: %v", s.ID, err)
+			}
+		case string(schemas.StatusApproval):
+			// Approval request was lost in the crash. Cancel it.
+			log.Printf("bootstrap: cancelling orphaned approval session %s", s.ID)
+			_ = cp.Transition(ctx, s.ID, schemas.StatusCancelling)
+			_ = cp.Transition(ctx, s.ID, schemas.StatusFailed)
+		default:
+			log.Printf("bootstrap: leaving session %s in state %s (no auto-resume)", s.ID, s.Status)
+		}
+	}
 
 	plugs := newPlugins(cfg)
 	for _, p := range plugs {

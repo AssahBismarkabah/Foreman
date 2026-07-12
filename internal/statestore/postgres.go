@@ -123,12 +123,12 @@ func EnsureDatabase(ctx context.Context, dsn string) error {
 
 func (s *postgresStore) CreateSession(ctx context.Context, sess Session) error {
 	const q = `
-		INSERT INTO sessions (id, task_id, user_id, plugin_id, status, checkpoint_ref, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO sessions (id, task_id, user_id, plugin_id, status, description, checkpoint_ref, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 	_, err := s.pool.Exec(ctx, q,
 		sess.ID, sess.TaskID, nullString(sess.UserID), nullString(sess.PluginID),
-		sess.Status, nullString(sess.CheckpointRef),
+		sess.Status, sess.Description, nullString(sess.CheckpointRef),
 		sess.CreatedAt, sess.UpdatedAt,
 	)
 	if err != nil {
@@ -140,14 +140,14 @@ func (s *postgresStore) CreateSession(ctx context.Context, sess Session) error {
 func (s *postgresStore) GetSession(ctx context.Context, id string) (Session, error) {
 	const q = `
 		SELECT id, task_id, COALESCE(user_id, ''), COALESCE(plugin_id, ''), status,
-		       COALESCE(checkpoint_ref, ''), created_at, updated_at
+		       description, COALESCE(checkpoint_ref, ''), created_at, updated_at
 		FROM sessions WHERE id = $1
 	`
 	row := s.pool.QueryRow(ctx, q, id)
 	var sess Session
 	err := row.Scan(
 		&sess.ID, &sess.TaskID, &sess.UserID, &sess.PluginID,
-		&sess.Status, &sess.CheckpointRef,
+		&sess.Status, &sess.Description, &sess.CheckpointRef,
 		&sess.CreatedAt, &sess.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -174,7 +174,7 @@ func (s *postgresStore) UpdateSessionStatus(ctx context.Context, id string, stat
 func (s *postgresStore) ListNonTerminalSessions(ctx context.Context) ([]Session, error) {
 	const q = `
 		SELECT id, task_id, COALESCE(user_id, ''), COALESCE(plugin_id, ''), status,
-		       COALESCE(checkpoint_ref, ''), created_at, updated_at
+		       description, COALESCE(checkpoint_ref, ''), created_at, updated_at
 		FROM sessions
 		WHERE status NOT IN ('COMPLETED', 'FAILED')
 		ORDER BY created_at DESC
@@ -190,7 +190,7 @@ func (s *postgresStore) ListNonTerminalSessions(ctx context.Context) ([]Session,
 		var sess Session
 		if err := rows.Scan(
 			&sess.ID, &sess.TaskID, &sess.UserID, &sess.PluginID,
-			&sess.Status, &sess.CheckpointRef,
+			&sess.Status, &sess.Description, &sess.CheckpointRef,
 			&sess.CreatedAt, &sess.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)

@@ -21,7 +21,7 @@ Goal: Core daemon running with a single agent type and local Docker sandbox.
 - [X] One Agent Adapter (OpenCode with JSONL parsing)
 - [X] MCP Hub with filesystem and git tools
 - [X] Foreman CLI (serve + task subcommands)
-- [ ] Session recovery on restart (happy path)
+- [X] Session recovery on restart (happy path)
 - [X] Integration test: coordinator -> real Docker -> mock adapter -> COMPLETED (checkpoint proof)
 
 **Checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back. **MET** -- `TestIntegration_CoordinatorWithRealDocker` proves the full pipeline with real Docker sandbox, session COMPLETED, and container cleanup.
