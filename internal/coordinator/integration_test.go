@@ -66,7 +66,7 @@ func TestIntegration_CoordinatorWithRealDocker(t *testing.T) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := sandbox.NewDockerSandbox("alpine:latest")
 	adapters := []adapter.AgentAdapter{&echoAdapter{}}
-	co := New(bus, cp, sbox, hub, adapters, 5)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5)
 
 	// Subscribe to agent.output events to verify they are published
 	var agentEvents []schemas.Event

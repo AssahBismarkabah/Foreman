@@ -32,6 +32,12 @@ const (
 	EvToolResolved EventType = "tool.resolved"
 	EvToolCall     EventType = "tool.call"
 	EvToolResult   EventType = "tool.result"
+
+	// User / Communication
+	EvUserMessage     EventType = "user.message"
+	EvApprovalRequest EventType = "approval.request"
+	EvApprovalGranted EventType = "approval.granted"
+	EvApprovalDenied  EventType = "approval.denied"
 )
 
 type Event struct {
@@ -65,6 +71,30 @@ type ToolCallPayload struct {
 	ToolName  string `json:"tool_name"`
 	Args      any    `json:"args"`
 	SessionID string `json:"session_id"`
+}
+
+// UserMessage is a message from a chat user relayed by a communication plugin.
+type UserMessage struct {
+	Plugin   string `json:"plugin"` // "slack", "discord"
+	UserID   string `json:"user_id"`
+	Channel  string `json:"channel"`
+	Text     string `json:"text"`
+	ThreadTS string `json:"thread_ts,omitempty"`
+}
+
+// Message is a simple text message sent to a chat channel.
+type Message struct {
+	Text   string `json:"text"`
+	Thread string `json:"thread,omitempty"`
+}
+
+// Block is a rich UI element for Slack Block Kit or Discord embeds.
+// Type is the platform-independent kind ("section", "actions", "context").
+// Elements contains platform-specific payloads (serialized per-plugin).
+type Block struct {
+	Type     string           `json:"type"`
+	Fields   map[string]any   `json:"fields,omitempty"`
+	Elements []map[string]any `json:"elements,omitempty"`
 }
 
 // SessionStatus tracks the lifecycle state of a session.

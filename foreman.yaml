@@ -41,6 +41,27 @@ subsystems:
       heartbeat_interval: 30s
       heartbeat_timeout: 90s
 
+  # --- Communication Plugins ---
+  # Slack plugin uses Socket Mode (WebSocket). No public endpoint needed.
+  # Set up a Slack App with:
+  #   - Socket Mode enabled
+  #   - Bot Token (xoxb-*) with chat:write, commands scopes
+  #   - App-Level Token (xapp-*) with connections:write scope
+  #   - Slash command: /foreman
+  #   - Subscribe to: app_mention, message.im
+  # plugins:
+  #   slack:
+  #     bot_token: ${SLACK_BOT_TOKEN}
+  #     app_token: ${SLACK_APP_TOKEN}
+  #     signing_secret: ${SLACK_SIGNING_SECRET}
+  # Discord plugin uses the Gateway API (WebSocket). No public endpoint needed.
+  # Set up a Discord App with:
+  #   - Bot with Message Content Intent enabled
+  #   - Slash command: /foreman
+  #   - Bot token from Discord Developer Portal
+  #   discord:
+  #     bot_token: ${DISCORD_BOT_TOKEN}
+
   # --- MCP Hub ---
   mcphub:
     servers:

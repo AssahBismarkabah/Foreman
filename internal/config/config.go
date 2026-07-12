@@ -19,6 +19,7 @@ type Subsystems struct {
 	Coordinator CoordinatorConfig `yaml:"coordinator"`
 	Agents      []AgentConfig     `yaml:"agents"`
 	MCPHub      MCPHubConfig      `yaml:"mcphub"`
+	Plugins     PluginsConfig     `yaml:"plugins"`
 }
 
 type EventBusConfig struct {
@@ -39,8 +40,21 @@ type StateStoreConfig struct {
 }
 
 type CoordinatorConfig struct {
-	MaxConcurrent  int           `yaml:"max_concurrent"`
-	DefaultTimeout time.Duration `yaml:"default_timeout"`
+	MaxConcurrent  int            `yaml:"max_concurrent"`
+	DefaultTimeout time.Duration  `yaml:"default_timeout"`
+	Policies       []PolicyConfig `yaml:"policies"`
+}
+
+type PolicyConfig struct {
+	Name    string        `yaml:"name"`
+	Match   MatchConfig   `yaml:"match"`
+	Action  string        `yaml:"action"`
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+type MatchConfig struct {
+	Tool   string            `yaml:"tool"`
+	Inputs map[string]string `yaml:"inputs,omitempty"`
 }
 
 type AgentConfig struct {
@@ -50,6 +64,21 @@ type AgentConfig struct {
 	Cwd               string        `yaml:"cwd"`
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
 	HeartbeatTimeout  time.Duration `yaml:"heartbeat_timeout"`
+}
+
+type PluginsConfig struct {
+	Slack   *SlackPluginConfig   `yaml:"slack,omitempty"`
+	Discord *DiscordPluginConfig `yaml:"discord,omitempty"`
+}
+
+type SlackPluginConfig struct {
+	BotToken      string `yaml:"bot_token"`
+	AppToken      string `yaml:"app_token"`
+	SigningSecret string `yaml:"signing_secret"`
+}
+
+type DiscordPluginConfig struct {
+	BotToken string `yaml:"bot_token"` // Bot token from Discord Developer Portal
 }
 
 type MCPHubConfig struct {

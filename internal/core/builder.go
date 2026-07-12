@@ -11,6 +11,10 @@ import (
 	"github.com/foreman/foreman/internal/coordinator"
 	"github.com/foreman/foreman/internal/eventbus"
 	"github.com/foreman/foreman/internal/mcphub"
+	"github.com/foreman/foreman/internal/plugins"
+	"github.com/foreman/foreman/internal/plugins/discord"
+	"github.com/foreman/foreman/internal/plugins/slack"
+	"github.com/foreman/foreman/internal/policy"
 	"github.com/foreman/foreman/internal/sandbox"
 	"github.com/foreman/foreman/internal/statestore"
 )
@@ -24,6 +28,7 @@ type App struct {
 	MCPHub       mcphub.MCPHub
 	ControlPlane *controlplane.ControlPlane
 	Coordinator  *coordinator.Coordinator
+	Plugins      []plugins.Plugin
 }
 
 // Bootstrap reads config, creates all subsystems, and wires them together.
@@ -65,7 +70,20 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 
 	adapters := newAdapters(cfg, bus)
 
-	co := coordinator.New(bus, cp, sbox, mcp, adapters, cfg.Subsystems.Coordinator.MaxConcurrent)
+	policies, err := newPolicies(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("policies: %w", err)
+	}
+
+	co := coordinator.New(bus, cp, sbox, mcp, adapters, policies, cfg.Subsystems.Coordinator.MaxConcurrent)
+
+	plugs := newPlugins(cfg)
+	for _, p := range plugs {
+		if err := p.Start(ctx, bus); err != nil {
+			return nil, fmt.Errorf("plugin %s: start: %w", p.Name(), err)
+		}
+		log.Printf("bootstrap: plugin %s started", p.Name())
+	}
 
 	return &App{
 		Config:       cfg,
@@ -75,6 +93,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		MCPHub:       mcp,
 		ControlPlane: cp,
 		Coordinator:  co,
+		Plugins:      plugs,
 	}, nil
 }
 
@@ -150,8 +169,52 @@ func newStateStore(ctx context.Context, cfg *config.Config) (statestore.StateSto
 	}
 }
 
+// newPolicies compiles policy configs into usable policies.
+func newPolicies(cfg *config.Config) ([]policy.Policy, error) {
+	cfgs := cfg.Subsystems.Coordinator.Policies
+	if len(cfgs) == 0 {
+		return nil, nil
+	}
+	policyCfgs := make([]policy.Config, 0, len(cfgs))
+	for _, c := range cfgs {
+		policyCfgs = append(policyCfgs, policy.Config{
+			Name: c.Name,
+			Match: policy.MatchDef{
+				Tool:   c.Match.Tool,
+				Inputs: c.Match.Inputs,
+			},
+			Action:  c.Action,
+			Timeout: c.Timeout,
+		})
+	}
+	return policy.CompileConfigs(policyCfgs)
+}
+
+// newPlugins builds the configured communication plugins.
+func newPlugins(cfg *config.Config) []plugins.Plugin {
+	var result []plugins.Plugin
+	if cfg.Subsystems.Plugins.Slack != nil {
+		result = append(result, slack.New(slack.Config{
+			BotToken:      cfg.Subsystems.Plugins.Slack.BotToken,
+			AppToken:      cfg.Subsystems.Plugins.Slack.AppToken,
+			SigningSecret: cfg.Subsystems.Plugins.Slack.SigningSecret,
+		}))
+	}
+	if cfg.Subsystems.Plugins.Discord != nil {
+		result = append(result, discord.New(discord.Config{
+			BotToken: cfg.Subsystems.Plugins.Discord.BotToken,
+		}))
+	}
+	return result
+}
+
 // Shutdown gracefully shuts down the app.
 func (a *App) Shutdown(ctx context.Context) {
+	for _, p := range a.Plugins {
+		if err := p.Stop(ctx); err != nil {
+			log.Printf("shutdown: plugin %s: stop: %v", p.Name(), err)
+		}
+	}
 	if a.StateStore != nil {
 		a.StateStore.Close()
 	}

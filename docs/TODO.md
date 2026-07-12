@@ -32,13 +32,13 @@ Goal: Core daemon running with a single agent type and local Docker sandbox.
 
 Goal: Real chat interaction, approval gates, and identity.
 
-- [ ] Slack Plugin (slash commands, thread updates, buttons)
-- [ ] Discord Plugin (slash commands, thread updates)
-- [ ] Approval Gate with policy engine
+- [X] Slack Plugin (Socket Mode, slash commands, interactive buttons, DM handling)
+- [X] Discord Plugin (Gateway API, slash commands, interactive buttons, DM handling)
+- [X] Approval Gate with policy engine
 - [ ] Identity Provider + GitHub/GitLab App integration
 - [ ] Scoped agent tokens
 - [ ] Audit trail persistence
-- [ ] Approval/deny flow through chat
+- [X] Approval/deny flow through chat
 
 **Checkpoint:** User writes `/foreman fix this bug` in Slack, agent fixes it, creates PR, user approves via button in Slack, PR is created.
 
@@ -112,14 +112,18 @@ Tasks that fall outside the phase structure but are already done.
 - [X] MemoryBus wildcard matching (NATS-style * and > patterns)
 - [X] Coordinator wired to adapter + sandbox + MCP hub
 - [X] CI pipeline: parallel lint/test jobs, module caching, golangci-lint v2, opencode cache
-- [X] 107 tests total (all passing, golangci-lint clean):
+- [X] 111 tests total (all passing, golangci-lint clean):
   - adapter: 14 (JSONL parsing, BuildConfig, Verify, StartCommand, InjectPrompt)
   - config: 4 (valid YAML, minimal YAML, missing file, invalid YAML)
   - controlplane: 7 (create, transitions, emit, happy path, approval path)
-  - coordinator: 8 (submit, adapter failure, max concurrent, scoping, full pipeline events, non-zero exit, provision failure, verify failure, multi-line output)
+  - coordinator: 10 (submit, adapter failure, max concurrent, scoping, full pipeline events, multi-line, non-zero, provision failure, verify failure, integration)
   - core: 5 (bootstrap memory bus, bootstrap Docker+OpenCode, invalid kinds, shutdown closes bus)
   - eventbus: 15 (10 memory + 5 NATS embedded: pub/sub, multiple subscribers, wildcards, no cross-talk, pub-before-sub)
-  - mcphub: 6 (empty hub, with servers, resolve tools, register server, list servers)
+  - mcphub: 7 (empty hub, with servers, resolve tools, register server, list servers)
   - plugin: 6 (start/read output, send message, send block, stop kills process, name/version, done event)
+  - plugins/slack: 10 (New, Start validations, nil-client safety, toSlackBlock: section/actions/context/divider/unknown)
+  - plugins/discord: 9 (New, Start validations, stop, toString, buttonStyle, nil-client safety)
+  - policy: 9 (compile configs, timeout, tool glob, wildcard glob, input regex, input field match, catch-all, multiple policies)
   - sandbox: 6 (provision+destroy, execute, write+read file, exit code, subscribe events, destroy nonexistent)
   - schemas: 3 (Subject, SessionSubject, SessionEventSubject)
+  - statestore: 5 (create+get, update status, list non-terminal, not found, ping)
