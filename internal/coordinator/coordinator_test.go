@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -438,3 +439,146 @@ func (m *multiLineSandbox) SubscribeEvents(ctx context.Context, sessionID string
 }
 func (m *multiLineSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
 func (m *multiLineSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+
+// heartbeatFailSandbox returns success from Heartbeat for the first call,
+// then returns errors. Execute blocks until the context is cancelled.
+// This simulates a sandbox that starts healthy then crashes.
+type heartbeatFailSandbox struct {
+	mu        sync.Mutex
+	callCount int
+}
+
+func (m *heartbeatFailSandbox) Provision(ctx context.Context, spec sandbox.SandboxSpec) (string, error) {
+	return "sandbox_hb_fail", nil
+}
+func (m *heartbeatFailSandbox) Execute(ctx context.Context, sessionID string, cmd []string, timeout time.Duration) (*sandbox.ExecutionResult, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (m *heartbeatFailSandbox) WriteFile(ctx context.Context, sessionID, path string, content []byte) error {
+	return nil
+}
+func (m *heartbeatFailSandbox) ReadFile(ctx context.Context, sessionID, path string) ([]byte, error) {
+	return nil, nil
+}
+func (m *heartbeatFailSandbox) UploadCheckpoint(ctx context.Context, sessionID, sourceDir string) (string, error) {
+	return "cp_1", nil
+}
+func (m *heartbeatFailSandbox) SubscribeEvents(ctx context.Context, sessionID string) (<-chan sandbox.SandboxEvent, error) {
+	return make(chan sandbox.SandboxEvent), nil
+}
+func (m *heartbeatFailSandbox) Heartbeat(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	m.callCount++
+	count := m.callCount
+	m.mu.Unlock()
+	if count > 1 {
+		return fmt.Errorf("container not running")
+	}
+	return nil
+}
+func (m *heartbeatFailSandbox) Destroy(ctx context.Context, sessionID string) error { return nil }
+
+// blockingSandbox blocks Execute until context is cancelled.
+type blockingSandbox struct{}
+
+func (m *blockingSandbox) Provision(ctx context.Context, spec sandbox.SandboxSpec) (string, error) {
+	return "sandbox_block", nil
+}
+func (m *blockingSandbox) Execute(ctx context.Context, sessionID string, cmd []string, timeout time.Duration) (*sandbox.ExecutionResult, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (m *blockingSandbox) WriteFile(ctx context.Context, sessionID, path string, content []byte) error {
+	return nil
+}
+func (m *blockingSandbox) ReadFile(ctx context.Context, sessionID, path string) ([]byte, error) {
+	return nil, nil
+}
+func (m *blockingSandbox) UploadCheckpoint(ctx context.Context, sessionID, sourceDir string) (string, error) {
+	return "cp_1", nil
+}
+func (m *blockingSandbox) SubscribeEvents(ctx context.Context, sessionID string) (<-chan sandbox.SandboxEvent, error) {
+	return make(chan sandbox.SandboxEvent), nil
+}
+func (m *blockingSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
+func (m *blockingSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+
+func TestCoordinatorCrashDetectionAndRetry(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	cp := controlplane.New(bus, nil)
+	hub := mcphub.NewStaticHub(nil)
+	sbox := &heartbeatFailSandbox{}
+	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
+
+	// Enable heartbeat monitoring with fast detection:
+	// 50ms interval, 200ms timeout = 4 consecutive failures before crash declared
+	// maxRetries=1 for a fast test.
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil,
+		50*time.Millisecond,  // heartbeatInterval
+		200*time.Millisecond, // heartbeatTimeout
+		1,                    // maxRetries
+		10*time.Millisecond,  // backoffBase (small for fast test)
+		1.5,                  // backoffMultiplier
+		5*time.Millisecond,   // jitter
+		0, 0,                 // no resource alerts
+	)
+
+	ctx := context.Background()
+	if err := co.SubmitTask(ctx, "task_crash", "will crash"); err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	// The session should go through ALLOCATING -> RUNNING -> CRASH -> FAILED
+	// The crash should be detected within ~200ms, then 1 retry happens
+	// (which also fails), so total time ~600ms. Use 10s timeout for safety.
+	waitForStatus(t, cp, "ses_task_crash", schemas.StatusFailed, 10*time.Second)
+
+	s, ok := cp.GetSession("ses_task_crash")
+	if !ok {
+		t.Fatal("session not found")
+	}
+	if s.Status != schemas.StatusFailed {
+		t.Fatalf("expected FAILED, got %s", s.Status)
+	}
+}
+
+func TestCoordinatorGracefulShutdown(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	cp := controlplane.New(bus, nil)
+	hub := mcphub.NewStaticHub(nil)
+	sbox := &blockingSandbox{}
+	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Submit a blocking task
+	if err := co.SubmitTask(ctx, "task_shutdown", "blocking task"); err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	// Wait for it to reach RUNNING
+	waitForStatus(t, cp, "ses_task_shutdown", schemas.StatusRunning, 5*time.Second)
+
+	// Stop accepting new tasks
+	co.StopAccepting()
+
+	// New tasks should be rejected
+	if err := co.SubmitTask(ctx, "task_rejected", "should fail"); err == nil {
+		t.Error("expected error after StopAccepting")
+	}
+
+	// Cancel the parent context to unblock the active session's Execute
+	cancel()
+
+	// Drain should complete quickly after the session unblocks
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer drainCancel()
+	remaining := co.Drain(drainCtx)
+	t.Logf("Drain returned %d remaining sessions", remaining)
+
+	// The session should have failed (Execute returned context.Canceled)
+	waitForStatus(t, cp, "ses_task_shutdown", schemas.StatusFailed, 2*time.Second)
+}

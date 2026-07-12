@@ -303,10 +303,14 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 	})
 
 	// --- Transition to RUNNING ---
-	if err := c.cp.Transition(ctx, sessionID, schemas.StatusRunning); err != nil {
-		c.cleanupSandbox(ctx, sandboxID)
-		log.Printf("coordinator: transition to running: %v", err)
-		return
+	// Idempotent -- skip if session is already RUNNING (e.g. after a crash retry
+	// where the session was never transitioned to a terminal state).
+	if s, ok := c.cp.GetSession(sessionID); !ok || s.Status != schemas.StatusRunning {
+		if err := c.cp.Transition(ctx, sessionID, schemas.StatusRunning); err != nil {
+			c.cleanupSandbox(ctx, sandboxID)
+			log.Printf("coordinator: transition to running: %v", err)
+			return
+		}
 	}
 
 	// --- Save baseline checkpoint ---
@@ -328,7 +332,7 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 
 	crashCh := make(chan error, 1)
 	if c.heartbeatInterval > 0 {
-		go c.monitorHeartbeat(heartbeatCtx, sessionID, sandboxID, crashCh)
+		go c.monitorHeartbeat(heartbeatCtx, sessionID, sandboxID, crashCh, heartbeatCancel)
 	}
 
 	// --- Start resource monitor (if thresholds configured) ---
@@ -437,9 +441,10 @@ func (c *Coordinator) Start(ctx context.Context) error {
 
 // monitorHeartbeat runs in a goroutine per active session. It calls
 // sbox.Heartbeat on every tick. After heartbeatTimeout worth of consecutive
-// failures it sends the error to crashCh, which should cancel the execute
-// context. Returns immediately if heartbeat monitoring is disabled.
-func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID string, crashCh chan<- error) {
+// failures it sends the error to crashCh and calls heartbeatCancel to
+// interrupt the agent execution. Returns immediately if monitoring is
+// disabled (heartbeatInterval <= 0).
+func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID string, crashCh chan<- error, heartbeatCancel context.CancelFunc) {
 	if c.heartbeatInterval <= 0 {
 		return
 	}
@@ -468,6 +473,7 @@ func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID
 					case crashCh <- fmt.Errorf("heartbeat lost after %d failures: %w", consecutiveFailures, err):
 					default:
 					}
+					heartbeatCancel() // interrupt the blocking sbox.Execute
 					return
 				}
 			} else {
