@@ -64,7 +64,10 @@ func TestIntegration_CoordinatorWithRealDocker(t *testing.T) {
 
 	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
-	sbox := sandbox.NewDockerSandbox("alpine:latest")
+	sbox, err := sandbox.NewDockerSandbox("alpine:latest")
+	if err != nil {
+		t.Fatalf("NewDockerSandbox: %v", err)
+	}
 	adapters := []adapter.AgentAdapter{&echoAdapter{}}
 	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
 

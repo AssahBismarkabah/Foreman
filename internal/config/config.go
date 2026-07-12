@@ -113,5 +113,12 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+
+	// Environment variable overrides. Docker Compose sets FOREMAN_PG_DSN
+	// so the container can resolve the hostname (e.g. "postgres" service name).
+	if dsn := os.Getenv("FOREMAN_PG_DSN"); dsn != "" {
+		cfg.Subsystems.StateStore.DSN = dsn
+	}
+
 	return &cfg, nil
 }

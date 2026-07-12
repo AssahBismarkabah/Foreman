@@ -19,11 +19,20 @@ func skipNoDocker(t *testing.T) {
 	}
 }
 
+func newTestDockerSandbox(t *testing.T) *DockerSandbox {
+	t.Helper()
+	s, err := NewDockerSandbox("alpine:latest")
+	if err != nil {
+		t.Fatalf("NewDockerSandbox: %v", err)
+	}
+	return s
+}
+
 func TestDockerSandbox_ProvisionAndDestroy(t *testing.T) {
 	skipNoDocker(t)
 
 	ctx := context.Background()
-	s := NewDockerSandbox("alpine:latest")
+	s := newTestDockerSandbox(t)
 
 	sessionID, err := s.Provision(ctx, SandboxSpec{Image: "alpine:latest"})
 	if err != nil {
@@ -49,7 +58,7 @@ func TestDockerSandbox_Execute(t *testing.T) {
 	skipNoDocker(t)
 
 	ctx := context.Background()
-	s := NewDockerSandbox("alpine:latest")
+	s := newTestDockerSandbox(t)
 
 	sessionID, err := s.Provision(ctx, SandboxSpec{Image: "alpine:latest"})
 	if err != nil {
@@ -77,7 +86,7 @@ func TestDockerSandbox_WriteAndReadFile(t *testing.T) {
 	skipNoDocker(t)
 
 	ctx := context.Background()
-	s := NewDockerSandbox("alpine:latest")
+	s := newTestDockerSandbox(t)
 
 	sessionID, err := s.Provision(ctx, SandboxSpec{Image: "alpine:latest"})
 	if err != nil {
@@ -107,7 +116,7 @@ func TestDockerSandbox_ExecuteWithExitCode(t *testing.T) {
 	skipNoDocker(t)
 
 	ctx := context.Background()
-	s := NewDockerSandbox("alpine:latest")
+	s := newTestDockerSandbox(t)
 
 	sessionID, err := s.Provision(ctx, SandboxSpec{Image: "alpine:latest"})
 	if err != nil {
@@ -134,7 +143,7 @@ func TestDockerSandbox_SubscribeEvents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	s := NewDockerSandbox("alpine:latest")
+	s := newTestDockerSandbox(t)
 
 	sessionID, err := s.Provision(ctx, SandboxSpec{Image: "alpine:latest"})
 	if err != nil {
@@ -164,7 +173,7 @@ func TestDockerSandbox_DestroyNonexistent(t *testing.T) {
 	skipNoDocker(t)
 
 	ctx := context.Background()
-	s := NewDockerSandbox("alpine:latest")
+	s := newTestDockerSandbox(t)
 
 	// Destroying a non-existent sandbox should return an error
 	err := s.Destroy(ctx, "nonexistent-sandbox")

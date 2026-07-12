@@ -246,7 +246,7 @@ func newEventBus(ctx context.Context, cfg *config.Config) (eventbus.EventBus, er
 func newSandbox(cfg *config.Config) (sandbox.Sandbox, error) {
 	switch cfg.Subsystems.Sandbox.Kind {
 	case "docker":
-		return sandbox.NewDockerSandbox(cfg.Subsystems.Sandbox.Image), nil
+		return sandbox.NewDockerSandbox(cfg.Subsystems.Sandbox.Image)
 	case "":
 		return nil, nil
 	default:

@@ -7,11 +7,11 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/foreman/foreman/internal/adapter"
 	"github.com/foreman/foreman/internal/controlplane"
 	"github.com/foreman/foreman/internal/eventbus"
@@ -617,18 +617,25 @@ func (c *Coordinator) handleCrash(ctx context.Context, sessionID, description, s
 // destroys those whose session IDs are not in the provided active set.
 // Call this on bootstrap before starting new sessions.
 func (c *Coordinator) ReapOrphanedContainers(ctx context.Context, activeSessions map[string]bool) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
-		"--filter", "name=foreman-sbox-",
-		"--format", "{{.Names}}")
-	out, err := cmd.Output()
+	// Get the Docker API client from the sandbox if it supports it.
+	dockerSbox, ok := c.sbox.(*sandbox.DockerSandbox)
+	if !ok {
+		log.Printf("coordinator: sandbox is not Docker-based, skipping container reaping")
+		return
+	}
+	apiClient := dockerSbox.APIClient()
+
+	containers, err := apiClient.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		log.Printf("coordinator: list containers for reaping: %v", err)
 		return
 	}
-	for _, name := range strings.Fields(string(out)) {
-		if name == "" {
+	for _, ctr := range containers {
+		// Only consider containers with the foreman-sbox- prefix.
+		if !strings.HasPrefix(ctr.Names[0], "/foreman-sbox-") {
 			continue
 		}
+		name := strings.TrimPrefix(ctr.Names[0], "/")
 		// Skip containers that belong to active sessions.
 		if activeSessions[name] {
 			continue
