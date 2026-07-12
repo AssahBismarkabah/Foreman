@@ -22,8 +22,9 @@ Goal: Core daemon running with a single agent type and local Docker sandbox.
 - [X] MCP Hub with filesystem and git tools
 - [X] Foreman CLI (serve + task subcommands)
 - [ ] Session recovery on restart (happy path)
+- [ ] Integration test: coordinator -> real Docker -> mock adapter -> COMPLETED (checkpoint proof)
 
-**Checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back.
+**Checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back. **NOT YET MET** -- all components tested in isolation, never wired end-to-end with real Docker through the coordinator.
 
 ---
 
@@ -110,4 +111,15 @@ Tasks that fall outside the phase structure but are already done.
 - [X] Docker sandbox: provision, exec, file ops, heartbeat, logs, destroy
 - [X] MemoryBus wildcard matching (NATS-style * and > patterns)
 - [X] Coordinator wired to adapter + sandbox + MCP hub
-- [X] 51 tests total (41 unit + 5 NATS integration + 5 Docker integration)
+- [X] CI pipeline: parallel lint/test jobs, module caching, golangci-lint v2, opencode cache
+- [X] 107 tests total (all passing, golangci-lint clean):
+  - adapter: 14 (JSONL parsing, BuildConfig, Verify, StartCommand, InjectPrompt)
+  - config: 4 (valid YAML, minimal YAML, missing file, invalid YAML)
+  - controlplane: 7 (create, transitions, emit, happy path, approval path)
+  - coordinator: 8 (submit, adapter failure, max concurrent, scoping, full pipeline events, non-zero exit, provision failure, verify failure, multi-line output)
+  - core: 5 (bootstrap memory bus, bootstrap Docker+OpenCode, invalid kinds, shutdown closes bus)
+  - eventbus: 15 (10 memory + 5 NATS embedded: pub/sub, multiple subscribers, wildcards, no cross-talk, pub-before-sub)
+  - mcphub: 6 (empty hub, with servers, resolve tools, register server, list servers)
+  - plugin: 6 (start/read output, send message, send block, stop kills process, name/version, done event)
+  - sandbox: 6 (provision+destroy, execute, write+read file, exit code, subscribe events, destroy nonexistent)
+  - schemas: 3 (Subject, SessionSubject, SessionEventSubject)
