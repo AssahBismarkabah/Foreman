@@ -35,10 +35,13 @@ Goal: Real chat interaction, approval gates, and identity.
 - [X] Slack Plugin (Socket Mode, slash commands, interactive buttons, DM handling)
 - [X] Discord Plugin (Gateway API, slash commands, interactive buttons, DM handling)
 - [X] Approval Gate with policy engine
-- [ ] Identity Provider + GitHub/GitLab App integration
+- [X] Approval/deny flow through chat
+- [X] Identity Provider -- config, model, keymanager, provider interface, OIDC issuer, JWT/JWKS, auth middleware
+- [X] GitHub App integration -- client, installation store, webhook handler with signature verification
+- [X] API Server -- HTTP wrapper with health, JWKS, OIDC configuration, and webhook routes
+- [X] Builder wiring -- identity, API server, session recovery routing (RUNNING -> resume, APPROVAL -> cancel), plugin startup all wired in `internal/core/builder.go`
 - [ ] Scoped agent tokens
 - [ ] Audit trail persistence
-- [X] Approval/deny flow through chat
 
 **Checkpoint:** User writes `/foreman fix this bug` in Slack, agent fixes it, creates PR, user approves via button in Slack, PR is created.
 
@@ -112,18 +115,21 @@ Tasks that fall outside the phase structure but are already done.
 - [X] MemoryBus wildcard matching (NATS-style * and > patterns)
 - [X] Coordinator wired to adapter + sandbox + MCP hub
 - [X] CI pipeline: parallel lint/test jobs, module caching, golangci-lint v2, opencode cache
-- [X] 111 tests total (all passing, golangci-lint clean):
-  - adapter: 14 (JSONL parsing, BuildConfig, Verify, StartCommand, InjectPrompt)
-  - config: 4 (valid YAML, minimal YAML, missing file, invalid YAML)
-  - controlplane: 7 (create, transitions, emit, happy path, approval path)
-  - coordinator: 10 (submit, adapter failure, max concurrent, scoping, full pipeline events, multi-line, non-zero, provision failure, verify failure, integration)
-  - core: 5 (bootstrap memory bus, bootstrap Docker+OpenCode, invalid kinds, shutdown closes bus)
-  - eventbus: 15 (10 memory + 5 NATS embedded: pub/sub, multiple subscribers, wildcards, no cross-talk, pub-before-sub)
-  - mcphub: 7 (empty hub, with servers, resolve tools, register server, list servers)
-  - plugin: 6 (start/read output, send message, send block, stop kills process, name/version, done event)
-  - plugins/slack: 10 (New, Start validations, nil-client safety, toSlackBlock: section/actions/context/divider/unknown)
-  - plugins/discord: 9 (New, Start validations, stop, toString, buttonStyle, nil-client safety)
-  - policy: 9 (compile configs, timeout, tool glob, wildcard glob, input regex, input field match, catch-all, multiple policies)
-  - sandbox: 6 (provision+destroy, execute, write+read file, exit code, subscribe events, destroy nonexistent)
-  - schemas: 3 (Subject, SessionSubject, SessionEventSubject)
-  - statestore: 5 (create+get, update status, list non-terminal, not found, ping)
+- [X] 229 tests across 17 packages (all passing, `go vet` clean, `go build` clean):
+  - `internal/adapter` -- JSONL parsing, BuildConfig, Verify, StartCommand, InjectPrompt
+  - `internal/api` -- server start/shutdown, route registration, health endpoint
+  - `internal/config` -- valid YAML, minimal YAML, missing file, invalid YAML
+  - `internal/controlplane` -- create, transitions, emit, happy path, approval path
+  - `internal/coordinator` -- submit, adapter failure, max concurrent, scoping, full pipeline events, multi-line, non-zero, provision failure, verify failure, integration
+  - `internal/core` -- bootstrap memory bus, bootstrap Docker+OpenCode, invalid kinds, shutdown closes bus
+  - `internal/eventbus` -- memory pub/sub, multiple subscribers, wildcards, no cross-talk, pub-before-sub; NATS embedded: pub/sub, wildcards, durable consumers
+  - `internal/identity` -- config, model, keymanager (RSA/ECDSA), issuer (tokens, JWKS, OIDC), middleware (auth, optional)
+  - `internal/identity/githubapp` -- client auth, installation store, webhook routing + signature verification
+  - `internal/mcphub` -- empty hub, with servers, resolve tools, register server, list servers
+  - `internal/plugin` -- start/read output, send message, send block, stop kills process, name/version, done event
+  - `internal/plugins/slack` -- New, Start validations, nil-client safety, toSlackBlock (section/actions/context/divider/unknown)
+  - `internal/plugins/discord` -- New, Start validations, stop, toString, buttonStyle, nil-client safety
+  - `internal/policy` -- compile configs, timeout, tool glob, wildcard glob, input regex, input field match, catch-all, multiple policies
+  - `internal/sandbox` -- provision+destroy, execute, write+read file, exit code, subscribe events, destroy nonexistent
+  - `internal/schemas` -- Subject, SessionSubject, SessionEventSubject
+  - `internal/statestore` -- create+get, update status, list non-terminal, not found, ping, description field, migrations

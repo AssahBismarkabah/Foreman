@@ -70,7 +70,7 @@ func TestClient_GetInstallationToken_CacheMiss(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"token": "ghs_fresh_token", "expires_at": "2026-07-13T00:00:00Z"}`)
+		_, _ = fmt.Fprint(w, `{"token": "ghs_fresh_token", "expires_at": "2026-07-13T00:00:00Z"}`)
 	}))
 	defer ts.Close()
 
@@ -113,7 +113,7 @@ func TestClient_ListInstallations(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `[
+		_, _ = fmt.Fprint(w, `[
 			{"id": 1, "account": {"id": 100, "login": "org-a", "type": "Organization"}, "suspended_at": null},
 			{"id": 2, "account": {"id": 200, "login": "user-b", "type": "User"}, "suspended_at": "2026-01-01T00:00:00Z"}
 		]`)
@@ -158,7 +158,7 @@ func TestClient_GetInstallationToken_HTTPError(t *testing.T) {
 
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(w, `{"message": "Not found"}`)
+		_, _ = fmt.Fprint(w, `{"message": "Not found"}`)
 	}))
 	defer ts.Close()
 
@@ -222,7 +222,7 @@ func TestClient_GetInstallationToken_ExpiredCache(t *testing.T) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"token": "ghs_refreshed", "expires_at": "2026-07-14T00:00:00Z"}`)
+		_, _ = fmt.Fprint(w, `{"token": "ghs_refreshed", "expires_at": "2026-07-14T00:00:00Z"}`)
 	}))
 	defer ts.Close()
 

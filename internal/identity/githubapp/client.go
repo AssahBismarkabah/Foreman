@@ -153,7 +153,7 @@ func (c *Client) GetInstallationToken(ctx context.Context, installID int64) (str
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("http POST: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusCreated {
@@ -199,7 +199,7 @@ func (c *Client) ListInstallations(ctx context.Context) ([]identity.Installation
 	if err != nil {
 		return nil, fmt.Errorf("http GET: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {

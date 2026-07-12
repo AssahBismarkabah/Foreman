@@ -212,7 +212,9 @@ func (iss *Issuer) OIDCConfigurationHandler(baseURL string) http.HandlerFunc {
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cfg)
+		if err := json.NewEncoder(w).Encode(cfg); err != nil {
+			http.Error(w, `{"error":"encode failed"}`, http.StatusInternalServerError)
+		}
 	}
 }
 

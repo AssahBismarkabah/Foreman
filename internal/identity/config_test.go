@@ -20,8 +20,8 @@ func TestSigningKeyConfig_Validate_EnvMissingEnvVar(t *testing.T) {
 }
 
 func TestSigningKeyConfig_Validate_EnvValid(t *testing.T) {
-	os.Setenv("FOREMAN_TEST_KEY", "test-key-data")
-	defer os.Unsetenv("FOREMAN_TEST_KEY")
+	_ = os.Setenv("FOREMAN_TEST_KEY", "test-key-data")
+	t.Cleanup(func() { _ = os.Unsetenv("FOREMAN_TEST_KEY") })
 
 	cfg := SigningKeyConfig{Source: "env", EnvVarName: "FOREMAN_TEST_KEY"}
 	if err := cfg.Validate(); err != nil {
@@ -61,7 +61,7 @@ func TestGitHubAppConfig_Validate_MissingAppID(t *testing.T) {
 	cfg := &GitHubAppConfig{AppID: 0, PrivateKeyPath: "/tmp/key.pem", WebhookSecret: "secret"}
 	// Create temp file for path validation
 	tmp, _ := os.CreateTemp("", "key.pem")
-	defer os.Remove(tmp.Name())
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 	cfg.PrivateKeyPath = tmp.Name()
 
 	if err := cfg.Validate(); err == nil {
@@ -78,7 +78,7 @@ func TestGitHubAppConfig_Validate_MissingPrivateKeyPath(t *testing.T) {
 
 func TestGitHubAppConfig_Validate_MissingWebhookSecret(t *testing.T) {
 	tmp, _ := os.CreateTemp("", "key.pem")
-	defer os.Remove(tmp.Name())
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 
 	cfg := &GitHubAppConfig{AppID: 123, PrivateKeyPath: tmp.Name(), WebhookSecret: ""}
 	if err := cfg.Validate(); err == nil {
@@ -88,7 +88,7 @@ func TestGitHubAppConfig_Validate_MissingWebhookSecret(t *testing.T) {
 
 func TestGitHubAppConfig_Validate_DefaultsWebhookEndpoint(t *testing.T) {
 	tmp, _ := os.CreateTemp("", "key.pem")
-	defer os.Remove(tmp.Name())
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 
 	cfg := &GitHubAppConfig{AppID: 123, PrivateKeyPath: tmp.Name(), WebhookSecret: "secret"}
 	if err := cfg.Validate(); err != nil {
@@ -101,7 +101,7 @@ func TestGitHubAppConfig_Validate_DefaultsWebhookEndpoint(t *testing.T) {
 
 func TestGitHubAppConfig_Validate_Valid(t *testing.T) {
 	tmp, _ := os.CreateTemp("", "key.pem")
-	defer os.Remove(tmp.Name())
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 
 	cfg := &GitHubAppConfig{
 		AppID:           123,
@@ -126,8 +126,8 @@ func TestIdentityProviderConfig_Validate_SigningKeyError(t *testing.T) {
 
 func TestIdentityProviderConfig_Validate_GitHubAppDisabled(t *testing.T) {
 	// GitHubApp nil = disabled, should pass signing key check with valid env
-	os.Setenv("FOREMAN_TEST_VALID", "key-data")
-	defer os.Unsetenv("FOREMAN_TEST_VALID")
+	_ = os.Setenv("FOREMAN_TEST_VALID", "key-data")
+	t.Cleanup(func() { _ = os.Unsetenv("FOREMAN_TEST_VALID") })
 
 	cfg := IdentityProviderConfig{
 		SigningKey: SigningKeyConfig{Source: "env", EnvVarName: "FOREMAN_TEST_VALID"},

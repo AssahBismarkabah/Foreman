@@ -20,8 +20,8 @@ func setupIssuer(t *testing.T) (*Issuer, string) {
 		t.Fatalf("GenerateKeyPair: %v", err)
 	}
 	pemData := pemEncodePrivateKey(key)
-	os.Setenv("FOREMAN_TEST_ISSUER_KEY", string(pemData))
-	t.Cleanup(func() { os.Unsetenv("FOREMAN_TEST_ISSUER_KEY") })
+	_ = os.Setenv("FOREMAN_TEST_ISSUER_KEY", string(pemData))
+	t.Cleanup(func() { _ = os.Unsetenv("FOREMAN_TEST_ISSUER_KEY") })
 
 	mgr := NewEnvKeyManager("test-key-1", "FOREMAN_TEST_ISSUER_KEY")
 	iss := NewIssuer(mgr, "foreman")
@@ -185,7 +185,7 @@ func TestIssuer_JWKSHandler(t *testing.T) {
 	handler(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -217,8 +217,8 @@ func TestIssuer_JWKSKeyCanVerifyToken(t *testing.T) {
 	}
 
 	// Now create a NEW issuer from the same key material and verify the token
-	os.Setenv("FOREMAN_TEST_VERIFY_KEY", pemData)
-	defer os.Unsetenv("FOREMAN_TEST_VERIFY_KEY")
+	_ = os.Setenv("FOREMAN_TEST_VERIFY_KEY", pemData)
+	t.Cleanup(func() { _ = os.Unsetenv("FOREMAN_TEST_VERIFY_KEY") })
 	mgr2 := NewEnvKeyManager("test-key-1", "FOREMAN_TEST_VERIFY_KEY")
 	iss2 := NewIssuer(mgr2, "foreman")
 

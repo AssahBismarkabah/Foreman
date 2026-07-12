@@ -91,8 +91,8 @@ func TestEnvKeyManager_SigningKey(t *testing.T) {
 	key, _ := GenerateKeyPair()
 	pemData := pemEncodePrivateKey(key)
 
-	os.Setenv("FOREMAN_TEST_SIGNING_KEY", string(pemData))
-	defer os.Unsetenv("FOREMAN_TEST_SIGNING_KEY")
+	_ = os.Setenv("FOREMAN_TEST_SIGNING_KEY", string(pemData))
+	t.Cleanup(func() { _ = os.Unsetenv("FOREMAN_TEST_SIGNING_KEY") })
 
 	mgr := NewEnvKeyManager("test-key-1", "FOREMAN_TEST_SIGNING_KEY")
 	ctx := context.Background()
@@ -114,8 +114,8 @@ func TestEnvKeyManager_VerificationKey(t *testing.T) {
 	key, _ := GenerateKeyPair()
 	pemData := pemEncodePrivateKey(key)
 
-	os.Setenv("FOREMAN_TEST_SIGNING_KEY_V", string(pemData))
-	defer os.Unsetenv("FOREMAN_TEST_SIGNING_KEY_V")
+	_ = os.Setenv("FOREMAN_TEST_SIGNING_KEY_V", string(pemData))
+	t.Cleanup(func() { _ = os.Unsetenv("FOREMAN_TEST_SIGNING_KEY_V") })
 
 	mgr := NewEnvKeyManager("test-key-1", "FOREMAN_TEST_SIGNING_KEY_V")
 	ctx := context.Background()
@@ -128,7 +128,7 @@ func TestEnvKeyManager_VerificationKey(t *testing.T) {
 	if !ok {
 		t.Fatal("expected *rsa.PublicKey")
 	}
-	if rsaPub.N.Cmp(key.PublicKey.N) != 0 {
+	if rsaPub.N.Cmp(key.N) != 0 {
 		t.Fatal("public key mismatch")
 	}
 }
@@ -164,11 +164,11 @@ func TestFileKeyManager_SigningKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
-	defer os.Remove(tmp.Name())
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 	if _, err := tmp.Write(pemData); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
-	tmp.Close()
+	_ = tmp.Close()
 
 	mgr := NewFileKeyManager("file-key-1", tmp.Name())
 	ctx := context.Background()
@@ -203,11 +203,11 @@ func TestFileKeyManager_VerificationKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.Write(pemData); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
-	tmp.Close()
+	_ = tmp.Close()
 
 	mgr := NewFileKeyManager("file-key-v", tmp.Name())
 	ctx := context.Background()
@@ -220,7 +220,7 @@ func TestFileKeyManager_VerificationKey(t *testing.T) {
 	if !ok {
 		t.Fatal("expected *rsa.PublicKey")
 	}
-	if rsaPub.N.Cmp(key.PublicKey.N) != 0 {
+	if rsaPub.N.Cmp(key.N) != 0 {
 		t.Fatal("public key mismatch")
 	}
 }
@@ -240,11 +240,11 @@ func TestFileKeyManager_InvalidPEM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
-	defer os.Remove(tmp.Name())
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 	if _, err := tmp.Write([]byte("not a valid pem")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	tmp.Close()
+	_ = tmp.Close()
 
 	mgr := NewFileKeyManager("test", tmp.Name())
 	ctx := context.Background()
@@ -257,8 +257,8 @@ func TestFileKeyManager_InvalidPEM(t *testing.T) {
 
 func TestNewSigningKeyManager_EnvDefault(t *testing.T) {
 	key, _ := GenerateKeyPair()
-	os.Setenv(DefaultSigningKeyEnvVar, string(pemEncodePrivateKey(key)))
-	defer os.Unsetenv(DefaultSigningKeyEnvVar)
+	_ = os.Setenv(DefaultSigningKeyEnvVar, string(pemEncodePrivateKey(key)))
+	t.Cleanup(func() { _ = os.Unsetenv(DefaultSigningKeyEnvVar) })
 
 	mgr, err := NewSigningKeyManager(SigningKeyConfig{Source: "env"})
 	if err != nil {
@@ -285,11 +285,11 @@ func TestNewSigningKeyManager_File(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
 	}
-	defer os.Remove(tmp.Name())
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 	if _, err := tmp.Write(pemEncodePrivateKey(key)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	tmp.Close()
+	_ = tmp.Close()
 
 	mgr, err := NewSigningKeyManager(SigningKeyConfig{
 		Source:   "file",
@@ -326,8 +326,8 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	// Test with env manager
-	os.Setenv("FOREMAN_TEST_RT_KEY", string(pemEncodePrivateKey(key)))
-	defer os.Unsetenv("FOREMAN_TEST_RT_KEY")
+	_ = os.Setenv("FOREMAN_TEST_RT_KEY", string(pemEncodePrivateKey(key)))
+	t.Cleanup(func() { _ = os.Unsetenv("FOREMAN_TEST_RT_KEY") })
 
 	mgr := NewEnvKeyManager("rt-key", "FOREMAN_TEST_RT_KEY")
 	priv, err := mgr.SigningKey(ctx)
