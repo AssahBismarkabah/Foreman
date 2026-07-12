@@ -1,7 +1,6 @@
 # Foreman
 
 [![Release](https://img.shields.io/github/v/release/AssahBismarkabah/Foreman?sort=semver)](https://github.com/AssahBismarkabah/Foreman/releases)
-----
 
 Foreman is an open source orchestrator that connects team chat to isolated
 agent sandboxes. It acts as a conductor for engineering work -- dispatch
@@ -16,7 +15,7 @@ the channel. Agents do the work. Foreman makes sure it is done right.
 
 Foreman is hosted at [github.com/AssahBismarkabah/Foreman].
 
-----
+---
 
 ## To start using Foreman
 
