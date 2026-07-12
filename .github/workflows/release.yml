@@ -124,5 +124,5 @@ jobs:
           body_path: ${{ runner.temp }}/changelog.txt
           files: |
             Dockerfile
-            docker-compose.yml
+            deploy/docker-compose.yml
             foreman.yaml
