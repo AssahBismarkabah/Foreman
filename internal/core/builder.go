@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -105,7 +106,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	}
 	co.ReapOrphanedContainers(ctx, activeSessions)
 
-	srv, err := newAPIServer(ctx, cfg, bus, iss)
+	srv, err := newAPIServer(ctx, cfg, bus, iss, co)
 	if err != nil {
 		return nil, fmt.Errorf("api server: %w", err)
 	}
@@ -182,8 +183,9 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 	}, nil
 }
 
-// newAPIServer creates the HTTP API server with identity/health/webhook routes.
-func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus, iss *identity.Issuer) (*api.Server, error) {
+// newAPIServer creates the HTTP API server with identity/health/webhook and
+// task management routes.
+func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus, iss *identity.Issuer, co *coordinator.Coordinator) (*api.Server, error) {
 	idCfg := cfg.Subsystems.Identity
 
 	// If no identity config is present, skip the API server.
@@ -209,6 +211,12 @@ func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus, 
 			iss.OIDCConfigurationHandler(idCfg.API.PublicURL))
 	}
 
+	// Task management endpoints
+	if co != nil {
+		srv.RegisterRoute("POST", "/api/v1/tasks", handleSubmitTask(co))
+		srv.RegisterRoute("GET", "/api/v1/sessions/{id}", handleGetSession(co))
+	}
+
 	// GitHub App webhook
 	if idCfg.GitHubApp != nil {
 		ghClient := githubapp.NewClient(idCfg.GitHubApp, nil)
@@ -225,6 +233,58 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, `{"status":"ok"}`)
+}
+
+// handleSubmitTask returns an HTTP handler that submits a new task.
+// Request body: {"task_id": "...", "description": "..."}
+// Response 202: {"session_id": "ses_..."}
+func handleSubmitTask(co *coordinator.Coordinator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			TaskID      string `json:"task_id"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+			return
+		}
+		if req.TaskID == "" || req.Description == "" {
+			http.Error(w, `{"error":"task_id and description are required"}`, http.StatusBadRequest)
+			return
+		}
+
+		if err := co.SubmitTask(context.Background(), req.TaskID, req.Description); err != nil {
+			log.Printf("api: submit task %s: %v", req.TaskID, err)
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+
+		sessionID := "ses_" + req.TaskID
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprintf(w, `{"session_id":"%s"}`, sessionID)
+	}
+}
+
+// handleGetSession returns an HTTP handler that returns the current status of a session.
+func handleGetSession(co *coordinator.Coordinator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, `{"error":"session id is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		info := co.GetSession(sessionID)
+		if info == nil {
+			http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(info)
+	}
 }
 
 // newEventBus creates the event bus based on config.
@@ -276,6 +336,10 @@ func newAdapters(cfg *config.Config, bus eventbus.EventBus) []adapter.AgentAdapt
 		case "opencode":
 			result = append(result, adapter.NewOpenCodeAdapter(
 				a.Cmd, a.Cwd, bus, a.HeartbeatInterval, a.HeartbeatTimeout,
+			))
+		case "exec":
+			result = append(result, adapter.NewExecAdapter(
+				a.Cmd, a.Cwd, a.HeartbeatTimeout,
 			))
 		default:
 			log.Printf("bootstrap: unknown agent kind %q for agent %q", a.Kind, a.Name)
