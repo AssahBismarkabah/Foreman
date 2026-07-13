@@ -92,7 +92,7 @@ func (s *composeStack) submitTask(taskID, description string) string {
 	if err != nil {
 		s.t.Fatalf("POST /api/v1/tasks: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
