@@ -100,7 +100,41 @@ Goal: Operable, documented, ready for real use.
 
 ---
 
-## Completed Work
+## E2E Validation (Gate before new features)
+
+Goal: Every built feature has an automated E2E test proving it works through the full stack before any new feature is added.
+
+### Done
+- [X] HTTP API -> exec adapter -> Docker sandbox -> COMPLETED (`TestE2E_ForemanStartTaskComplete`)
+
+### Pending (ordered by impact)
+
+- [X] **Coordinator failure modes** -- submit task, verify each failure path produces correct session status:
+  - [X] adapter verify failure -> FAILED (`TestE2E_AdapterVerifyFailure`)
+  - [X] agent non-zero exit -> FAILED (`TestE2E_AgentNonZeroExit`)
+  - [X] agent crash + container kill -> FAILED (`TestE2E_SandboxCrashDetection`)
+
+- [ ] **Session recovery on restart** -- start Foreman, submit task, kill Foreman mid-task, restart, verify session resumes (runs at COMPLETED). Uses Docker Compose restart, polls HTTP API.
+
+- [ ] **Approval gate flow** -- configure policy that requires approval for `echo`, submit task, verify session blocks on APPROVAL, submit approval response, verify session completes.
+
+- [ ] **Graceful shutdown with drain** -- submit task, send SIGTERM, verify Foreman waits for running task to finish before exiting, verify session reaches terminal state.
+
+- [ ] **NATS event bus** -- repeat the E2E test with `eventbus.kind: nats` instead of memory. Verify events survive publish before subscribe (JetStream durability).
+
+- [ ] **OpenCode adapter** -- E2E test with real opencode binary in the sandbox. Requires opencode installed in the CI runner.
+
+- [ ] **Identity / scoped tokens** -- submit task, verify `FOREMAN_AGENT_TOKEN` is injected into the sandbox, verify the token is a valid JWT with correct claims. Verify JWKS endpoint returns the signing key.
+
+- [ ] **GitHub App webhook** -- send a signed webhook payload to `/api/v1/webhooks/github`, verify it is processed. Requires real GitHub App credentials in CI secrets.
+
+- [ ] **Slack plugin** -- verify slash command, button interaction, and DM handling. Requires real Slack credentials in CI secrets.
+
+- [ ] **Discord plugin** -- verify slash command, button interaction, and DM handling. Requires real Discord credentials in CI secrets.
+
+- [ ] **Multiple concurrent tasks** -- submit N tasks (N > max_concurrent), verify only N run and the rest are rejected or queued.
+
+---
 
 Tasks that fall outside the phase structure but are already done.
 
