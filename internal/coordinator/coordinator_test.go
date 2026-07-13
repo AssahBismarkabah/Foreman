@@ -154,25 +154,61 @@ func (f *failBuildAdapter) CheckHealth(ctx context.Context) error { return nil }
 // We need fmt for the error format in failBuildAdapter.
 // Already imported below.
 
+// blockingAdapter holds the task in BuildConfig until the channel is closed,
+// ensuring the session stays active for concurrency checks.
+type blockingAdapter struct {
+	block chan struct{}
+}
+
+func (b *blockingAdapter) Name() string { return "blocking" }
+func (b *blockingAdapter) Meta() adapter.AgentMeta {
+	return adapter.AgentMeta{Name: "blocking", Version: "test"}
+}
+func (b *blockingAdapter) BuildConfig(ctx context.Context, cfg adapter.BuildConfig) ([]string, error) {
+	<-b.block
+	return []string{"echo", "agent-output"}, nil
+}
+func (b *blockingAdapter) Verify(ctx context.Context) error { return nil }
+func (b *blockingAdapter) StartCommand(ctx context.Context, cfg map[string]any) ([]string, error) {
+	return nil, nil
+}
+func (b *blockingAdapter) ParseEvent(ctx context.Context, line []byte) (any, error) {
+	return map[string]string{"type": "text", "text": string(line)}, nil
+}
+func (b *blockingAdapter) InjectPrompt(ctx context.Context, prompt string) ([]byte, error) {
+	return nil, nil
+}
+func (b *blockingAdapter) HeartbeatTimeout() time.Duration       { return time.Minute }
+func (b *blockingAdapter) CheckHealth(ctx context.Context) error { return nil }
+
 func TestSubmitTaskMaxConcurrent(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	cp := controlplane.New(bus, nil)
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
-	co := New(bus, cp, sbox, hub, nil, nil, 1, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+
+	block := make(chan struct{})
+	blkAdapter := &blockingAdapter{block: block}
+	co := New(bus, cp, sbox, hub, []adapter.AgentAdapter{blkAdapter}, nil, 1, nil, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	ctx := context.Background()
 
-	// First task should succeed
+	// First task -- goroutine will block on BuildConfig, holding the slot
 	if err := co.SubmitTask(ctx, "task_1", "first"); err != nil {
 		t.Fatal(err)
 	}
+
+	// Give the goroutine time to reach the blocking point
+	time.Sleep(10 * time.Millisecond)
 
 	// Second task should fail synchronously due to max concurrent
 	err := co.SubmitTask(ctx, "task_2", "second")
 	if err == nil {
 		t.Error("expected error for exceeding max concurrent tasks")
 	}
+
+	// Unblock the first task so the goroutine can exit cleanly
+	close(block)
 }
 
 func TestCoordinatorAdapterScoping(t *testing.T) {
