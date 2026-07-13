@@ -24,7 +24,9 @@ Goal: Core daemon running with a single agent type and local Docker sandbox.
 - [X] Session recovery on restart (happy path)
 - [X] Integration test: coordinator -> real Docker -> mock adapter -> COMPLETED (checkpoint proof)
 
-**Checkpoint:** Start Foreman, submit a task via CLI, see an agent work in a Docker container, get a result back. **MET** -- `TestIntegration_CoordinatorWithRealDocker` proves the full pipeline with real Docker sandbox, session COMPLETED, and container cleanup.
+- [X] E2E test via HTTP API: Docker Compose -> health -> submit task -> poll session -> COMPLETED
+
+**Checkpoint:** Start Foreman, submit a task via HTTP API, see an agent work in a Docker container, get a result back. **MET** -- `TestE2E_ForemanStartTaskComplete` (in `test/e2e/e2e_test.go`) proves the full pipeline via Docker Compose, HTTP API, real Docker sandbox, exec adapter, and session COMPLETED.
 
 ---
 
@@ -60,7 +62,7 @@ Goal: Handle failures gracefully. Survive crashes. Retry smartly.
 - [X] Resource monitoring -- Stats() on DockerSandbox, threshold alerts with debounce
 - [X] Integration tests -- crash detection+retry, graceful shutdown
 
-**Progress:** All 7 phases (A-G) complete. 239 tests across 17 packages.
+**Progress:** All 7 phases (A-G) complete.
 
 **Checkpoint:** Kill the Foreman mid-task, restart, verify the agent resumes from checkpoint. Kill the agent container, verify it gets restarted. **Met**: `TestCoordinatorCrashDetectionAndRetry` proves heartbeat detects crash, exponential backoff retries, retries exhaust -> FAILED. `TestCoordinatorGracefulShutdown` proves StopAccepting + Drain + clean teardown.
 
@@ -75,7 +77,7 @@ Goal: Multiple sandbox types, multiple agent frameworks.
 - [ ] Claude Code adapter
 - [ ] Codex adapter
 - [ ] OpenHands adapter
-- [ ] Generic adapter (Dockerfile-based)
+- [X] Exec adapter (kind "exec", runs `sh -c <task>` in sandbox)
 - [ ] Agent capability matching (pick the right agent for the job)
 - [ ] Task routing (split complex tasks into sub-tasks)
 - [ ] Concurrency limits and queuing
@@ -91,7 +93,7 @@ Goal: Operable, documented, ready for real use.
 - [ ] Monitoring & metrics (Prometheus + Grafana)
 - [ ] Structured logging (JSON, levels, correlation IDs)
 - [ ] Rate limiting per user/team/org
-- [ ] Admin API (list sessions, cancel tasks, view logs)
+- [X] Admin API (POST /api/v1/tasks, GET /api/v1/sessions/{id})
 - [ ] Configuration documentation
 - [ ] Onboarding documentation
 - [ ] Deployment guide (Docker Compose, Kubernetes)
@@ -118,7 +120,7 @@ Tasks that fall outside the phase structure but are already done.
 - [X] MemoryBus wildcard matching (NATS-style * and > patterns)
 - [X] Coordinator wired to adapter + sandbox + MCP hub
 - [X] CI pipeline: parallel lint/test jobs, module caching, golangci-lint v2, opencode cache
-- [X] 239 tests across 17 packages (all passing, `go vet` clean, `go build` clean, `golangci-lint` 0 issues):
+- [X] 197 tests across 20 packages (18 with tests, all passing, `go vet` clean, `go build` clean, `golangci-lint` 0 issues):
   - `internal/adapter` -- JSONL parsing, BuildConfig, Verify, StartCommand, InjectPrompt
   - `internal/api` -- server start/shutdown, route registration, health endpoint
   - `internal/config` -- valid YAML, minimal YAML, missing file, invalid YAML
@@ -135,4 +137,5 @@ Tasks that fall outside the phase structure but are already done.
   - `internal/policy` -- compile configs, timeout, tool glob, wildcard glob, input regex, input field match, catch-all, multiple policies
   - `internal/sandbox` -- provision+destroy, execute, write+read file, exit code, subscribe events, destroy nonexistent, resource usage stats
   - `internal/schemas` -- Subject, SessionSubject, SessionEventSubject
-  - `internal/statestore` -- create+get, update status, list non-terminal, not found, ping, description field, migrations, audit append, checkpoint save/get (5 tests)
+   - `internal/statestore` -- create+get, update status, list non-terminal, not found, ping, description field, migrations, audit append, checkpoint save/get (5 tests)
+   - `test/e2e` -- Docker Compose -> health -> HTTP task submit -> poll session -> COMPLETED (1 test)
