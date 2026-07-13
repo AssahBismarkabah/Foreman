@@ -36,6 +36,7 @@ type Coordinator struct {
 	sbox                sandbox.Sandbox
 	mcpHub              mcphub.MCPHub
 	adapters            map[string]adapter.AgentAdapter
+	adapterList         []adapter.AgentAdapter // ordered, for picking the first
 	policies            []policy.Policy
 	maxConcurrent       int
 	active              map[string]context.CancelFunc
@@ -78,8 +79,10 @@ func New(
 	memoryAlertPercent float64,
 ) *Coordinator {
 	adapterMap := make(map[string]adapter.AgentAdapter)
+	adapterList := make([]adapter.AgentAdapter, 0, len(adapters))
 	for _, a := range adapters {
 		adapterMap[a.Name()] = a
+		adapterList = append(adapterList, a)
 	}
 	if heartbeatInterval <= 0 {
 		heartbeatInterval = 0 // disabled
@@ -105,6 +108,7 @@ func New(
 		sbox:               sbox,
 		mcpHub:             mcpHub,
 		adapters:           adapterMap,
+		adapterList:        adapterList,
 		policies:           policies,
 		maxConcurrent:      maxConcurrent,
 		active:             make(map[string]context.CancelFunc),
@@ -156,6 +160,33 @@ func (c *Coordinator) Drain(ctx context.Context) int {
 			return remaining
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+}
+
+// SessionInfo holds a snapshot of a session's current state, safe for API serialization.
+type SessionInfo struct {
+	ID          string `json:"id"`
+	Status      string `json:"status"`
+	TaskID      string `json:"task_id"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// GetSession returns a snapshot of the session with the given ID.
+// Returns nil if the session does not exist.
+func (c *Coordinator) GetSession(sessionID string) *SessionInfo {
+	s, ok := c.cp.GetSession(sessionID)
+	if !ok {
+		return nil
+	}
+	return &SessionInfo{
+		ID:          s.ID,
+		Status:      string(s.Status),
+		TaskID:      s.TaskID,
+		Description: s.Description,
+		CreatedAt:   s.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   s.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -242,11 +273,10 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		c.mu.Unlock()
 	}()
 
-	// --- Pick the first configured adapter ---
+	// --- Pick the first configured adapter (ordered by config) ---
 	var agent adapter.AgentAdapter
-	for _, a := range c.adapters {
-		agent = a
-		break
+	if len(c.adapterList) > 0 {
+		agent = c.adapterList[0]
 	}
 	if agent == nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("no agent adapter configured"))

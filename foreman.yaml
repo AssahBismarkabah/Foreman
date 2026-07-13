@@ -33,7 +33,15 @@ subsystems:
     default_timeout: 5m
 
   # --- Agents ---
+  # The first agent in the list is used for task execution.
+  # For production, configure an LLM agent (opencode, claude-code, etc.).
+  # For testing, the "exec" agent runs shell commands directly.
   agents:
+    - name: exec
+      kind: exec
+      cmd: sh
+      cwd: /workspace
+      heartbeat_timeout: 60s
     - name: opencode
       kind: opencode
       cmd: npx opencode
