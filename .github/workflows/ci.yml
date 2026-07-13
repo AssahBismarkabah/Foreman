@@ -64,7 +64,7 @@ jobs:
 
       - run: make build
 
-      - name: Run tests (unit + integration, excludes E2E)
+      - name: Run tests
         run: go test -count=1 -p 1 $(go list ./... | grep -v test/e2e)
         env:
           FOREMAN_TEST_DATABASE_URL: postgres://foreman:foreman@localhost:5432/foreman_test?sslmode=disable
@@ -81,5 +81,5 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Run E2E test (Docker Compose -> HTTP API -> COMPLETED)
+      - name: Run E2E test
         run: go test -count=1 -v -timeout 180s ./test/e2e/
