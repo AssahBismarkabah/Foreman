@@ -728,9 +728,11 @@ func TestE2E_IdentityScopedToken(t *testing.T) {
 	stack := newComposeStack(t)
 	defer stack.teardown()
 
-	// Submit a long-running task so the sandbox stays alive while we inspect it
+	// Submit a task and verify the scoped agent token is injected via container env.
+	// The sleep only needs to be long enough for us to inspect the container; we
+	// use docker inspect (not exec), so it doesn't interact with the running process.
 	taskID := fmt.Sprintf("identity-%d", time.Now().UnixNano())
-	sid := stack.submitTask(taskID, "sleep 30")
+	sid := stack.submitTask(taskID, "sleep 10")
 
 	// Wait for RUNNING (sandbox provisioned with env vars)
 	status := stack.waitForStatus(sid, 30*time.Second, "RUNNING", "FAILED")
@@ -796,7 +798,7 @@ func TestE2E_IdentityScopedToken(t *testing.T) {
 	}
 
 	// Let the task complete
-	status = stack.waitForStatus(sid, 60*time.Second, "COMPLETED", "FAILED")
+	status = stack.waitForStatus(sid, 30*time.Second, "COMPLETED", "FAILED")
 	if status != "COMPLETED" {
 		t.Fatalf("expected COMPLETED, got %s", status)
 	}
