@@ -174,11 +174,15 @@ func (a *OpenCodeAdapter) CheckHealth(ctx context.Context) error {
 	return err
 }
 
-// buildRunArgs constructs the CLI args for "opencode run --format json ... -p <task>".
+// buildRunArgs constructs the CLI args for "opencode run --format json ... <task>".
+// In opencode v1.18.0+:
+//   - The prompt is a positional argument (not -p which is --password).
+//   - --auto auto-approves permission prompts (replaces the older
+//     --permission-mode bypassPermissions which was never shipped).
 func (a *OpenCodeAdapter) buildRunArgs(task string) []string {
 	return []string{
 		a.cmd, "run", "--format", "json",
-		"--permission-mode", "bypassPermissions",
-		"-p", task,
+		"--auto",
+		task,
 	}
 }

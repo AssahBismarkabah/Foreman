@@ -64,7 +64,78 @@ func TestMain(m *testing.M) {
 	}
 	fmt.Println("Foreman image (foreman:e2e) built successfully.")
 
+	// Build the mock LLM server binary and Docker image.
+	// This is used by agent adapter tests (opencode, claude-code, etc.) to
+	// provide a fake LLM endpoint without needing real API keys.
+	buildMockLLM()
+	fmt.Println("Mock LLM image (foreman:e2e-mockllm) built successfully.")
+
+	// Build agent-specific Docker images on top of foreman:e2e.
+	// Each image extends the base with the agent's runtime dependencies
+	// (Node.js, Python, etc.) so the adapter's Verify() passes.
+	// Paths are relative to CWD (test/e2e/).
+	if err := buildAgentImage("foreman:e2e-opencode", "agents/opencode.Dockerfile", "agents"); err != nil {
+		fmt.Printf("Failed to build opencode image: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("OpenCode image (foreman:e2e-opencode) built successfully.")
+
+	// Build the sandbox image used by agent adapter tests.
+	// This image has the opencode binary in PATH and no ENTRYPOINT so the
+	// sandbox provider's Cmd (tail -f /dev/null) takes effect.
+	if err := buildAgentImage("foreman:e2e-sandbox-opencode", "agents/sandbox-opencode.Dockerfile", "agents"); err != nil {
+		fmt.Printf("Failed to build sandbox image: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Sandbox image (foreman:e2e-sandbox-opencode) built successfully.")
+
 	os.Exit(m.Run())
+}
+
+// buildMockLLM builds the mock LLM server binary and Docker image.
+// CWD is test/e2e/ -- the mockllm source is at test/e2e/mockllm/.
+func buildMockLLM() {
+	// Build the Go binary for the mock LLM server.
+	// go build -o mockllm .  (from test/e2e/mockllm/)
+	buildCmd := exec.Command("go", "build", "-o", "mockllm", ".")
+	buildCmd.Dir = "mockllm"
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		fmt.Printf("Failed to build mock LLM binary: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Build the minimal Docker image (scratch + binary).
+	// docker build -t foreman:e2e-mockllm -f mockllm.Dockerfile .
+	imgCmd := exec.Command("docker", "build",
+		"-t", "foreman:e2e-mockllm",
+		"-f", "mockllm.Dockerfile",
+		".")
+	imgCmd.Dir = "mockllm"
+	imgCmd.Stdout = os.Stdout
+	imgCmd.Stderr = os.Stderr
+	if err := imgCmd.Run(); err != nil {
+		fmt.Printf("Failed to build mock LLM image: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// buildAgentImage builds a Docker image that extends foreman:e2e with an
+// agent's runtime dependencies (e.g., opencode needs Node.js + npm).
+// CWD is test/e2e/; dockerfilePath and contextDir are relative to CWD.
+func buildAgentImage(tag, dockerfilePath, contextDir string) error {
+	buildCmd := exec.Command("docker", "build",
+		"-t", tag,
+		"-f", dockerfilePath,
+		"--build-arg", "BASE_IMAGE=foreman:e2e",
+		contextDir)
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("docker build %s: %w", tag, err)
+	}
+	return nil
 }
 
 // composeStack manages a Docker Compose instance for a single E2E test.
@@ -98,6 +169,52 @@ func replaceBuildWithImage(src string) string {
         VERSION: ${FOREMAN_VERSION:-dev}`,
 		`    image: foreman:e2e`, 1)
 }
+
+// injectMockLLMService adds a mockllm service to the compose stack and wires
+// it into the foreman service via OPENAI_BASE_URL / OPENAI_API_KEY env vars,
+// plus a depends_on so the mock LLM starts before Foreman.
+func injectMockLLMService(src string) string {
+	// Add the mockllm service definition before the foreman service.
+	// The trailing newline (no spaces) ensures the next line (foreman:)
+	// starts at the correct 2-space indent level.
+	mockLLMSvc := `  mockllm:
+    image: foreman:e2e-mockllm
+    ports:
+      - "9999"
+
+`
+	src = strings.Replace(src, "\n  foreman:\n", "\n"+mockLLMSvc+"  foreman:\n", 1)
+
+	// Add depends_on: mockllm to the foreman service's existing depends_on block.
+	// The canonical compose file has:
+	//     depends_on:
+	//       postgres:
+	//         condition: service_healthy
+	mockLLMDep := `      mockllm:
+        condition: service_started
+`
+	src = strings.Replace(src,
+		"    depends_on:\n      postgres:\n        condition: service_healthy\n",
+		"    depends_on:\n      postgres:\n        condition: service_healthy\n"+mockLLMDep, 1)
+
+	// Add OPENAI_BASE_URL and OPENAI_API_KEY to the foreman service's
+	// environment block. Insert after the DOCKER_HOST entry.
+	mockLLMEnv := `      OPENAI_BASE_URL: http://mockllm:9999/v1
+      OPENAI_API_KEY: fake-key-for-testing
+`
+	src = strings.Replace(src,
+		"      DOCKER_HOST: unix:///var/run/docker.sock\n",
+		"      DOCKER_HOST: unix:///var/run/docker.sock\n"+mockLLMEnv, 1)
+
+	return src
+}
+
+// composeConfig returns the standard compose overrides needed by custom-config
+// tests: writing a docker-compose.yml with the pre-built image, fixing the
+// foreman.yaml volume path to absolute, and returning the temp dir path and
+// compose args. Tests that also need a mock LLM or agent image should call
+// the lower-level helpers (replaceBuildWithImage, injectMockLLMService,
+// replaceImageTag) on the base compose content before calling writeComposeFile.
 
 func newComposeStack(t *testing.T) *composeStack {
 	t.Helper()
@@ -978,4 +1095,125 @@ func TestE2E_MultipleConcurrentTasks(t *testing.T) {
 	stack.waitForStatus("ses_concurrent-1", 30*time.Second, "COMPLETED", "FAILED")
 	stack.waitForStatus("ses_concurrent-2", 30*time.Second, "COMPLETED", "FAILED")
 	t.Log("SUCCESS: Concurrent task limits correctly enforced.")
+}
+
+// TestE2E_OpenCodeAdapter tests the opencode adapter end-to-end:
+//   - Foreman is configured with the opencode adapter (kind: opencode, cmd: opencode)
+//   - The Foreman image includes node + npm-installed opencode CLI
+//   - A mock LLM server provides canned responses (no real API key needed)
+//   - A task is submitted and the session reaches COMPLETED
+//
+// This proves the full adapter pipeline: Verify -> Execute -> Parse -> COMPLETED.
+func TestE2E_OpenCodeAdapter(t *testing.T) {
+	if !dockerComposeAvailable() {
+		t.Skip("Docker Compose not available")
+	}
+
+	projectName := uniqueProjectName()
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "foreman.yaml")
+	composePath := filepath.Join(tmpDir, "docker-compose.yml")
+	overridePath := filepath.Join(tmpDir, "compose-override.yml")
+
+	// Read the canonical compose file and modify it:
+	//   1. Replace build: with image: foreman:e2e-opencode
+	//   2. Inject the mock LLM service + wire it into foreman
+	src, err := os.ReadFile(filepath.Join("../../deploy", "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yml: %v", err)
+	}
+	modified := replaceBuildWithImage(string(src))
+	modified = strings.ReplaceAll(modified, "image: foreman:e2e", "image: foreman:e2e-opencode")
+
+	// The opencode Docker image uses node:23-alpine which runs as root by
+	// default. The compose file already sets user: root:root for Docker socket
+	// access, so no override is needed -- just confirm the compose file has it.
+	if !strings.Contains(modified, "user: root:root") {
+		t.Fatal("expected user: root:root in compose file")
+	}
+	modified = injectMockLLMService(modified)
+
+	// Fix the foreman.yaml volume path (compose uses a relative path)
+	foremanCfg, err := filepath.Abs("../../foreman.yaml")
+	if err != nil {
+		t.Fatalf("resolve foreman.yaml path: %v", err)
+	}
+	modified = strings.ReplaceAll(modified, "../foreman.yaml", foremanCfg)
+
+	if err := os.WriteFile(composePath, []byte(modified), 0644); err != nil {
+		t.Fatalf("write docker-compose.yml: %v", err)
+	}
+
+	// Custom config with the opencode adapter as the primary agent.
+	// The opencode adapter uses "opencode" as the command (installed in the
+	// foreman:e2e-opencode image). The mock LLM server is at
+	// http://mockllm:9999/v1 (wired in by injectMockLLMService).
+	customCfg := `subsystems:
+  eventbus:
+    kind: memory
+  statestore:
+    kind: postgres
+    dsn: "postgres://foreman:foreman@postgres:5432/foreman?sslmode=disable"
+    max_connections: 25
+    min_connections: 5
+  sandbox:
+    kind: docker
+    image: foreman:e2e-sandbox-opencode
+  coordinator:
+    max_concurrent: 5
+    default_timeout: 5m
+    heartbeat_interval: 5s
+    heartbeat_timeout: 15s
+  agents:
+    - name: opencode
+      kind: opencode
+      cmd: opencode
+      cwd: /tmp
+  identity:
+    api:
+      listen_addr: ":8080"
+      public_url: "http://localhost:8080"
+    signing_key:
+      source: env
+      env_var_name: FOREMAN_SIGNING_KEY
+      key_id: foreman-1
+`
+	if err := os.WriteFile(cfgPath, []byte(customCfg), 0644); err != nil {
+		t.Fatalf("write custom config: %v", err)
+	}
+
+	// Override the base compose file's volume mount with the custom config.
+	override := fmt.Sprintf(`services:
+  foreman:
+    volumes:
+      - %s:/etc/foreman/foreman.yaml:ro
+`, cfgPath)
+	if err := os.WriteFile(overridePath, []byte(override), 0644); err != nil {
+		t.Fatalf("write compose override: %v", err)
+	}
+
+	args := []string{"compose",
+		"-p", projectName,
+		"-f", composePath,
+		"-f", overridePath,
+		"--profile", "service",
+	}
+
+	stack := &composeStack{
+		composeDir:  tmpDir,
+		composeArgs: args,
+		projectName: projectName,
+		t:           t,
+	}
+	defer stack.teardown()
+	stack.up()
+	stack.waitForHealth()
+
+	sid := stack.submitTask("opencode_e2e", "say hello and output the word hello")
+	status := stack.waitForStatus(sid, 90*time.Second, "COMPLETED", "FAILED")
+
+	if status != "COMPLETED" {
+		t.Fatalf("expected COMPLETED for opencode adapter, got %s", status)
+	}
+	t.Log("SUCCESS: OpenCode adapter correctly completed the task via mock LLM.")
 }
