@@ -126,7 +126,7 @@ Goal: Every built feature has an automated E2E test proving it works through the
 
 - [X] **Multiple concurrent tasks** -- submit N tasks (N > max_concurrent), verify only N run and the rest are rejected with 429 (`TestE2E_MultipleConcurrentTasks`).
 
-- [ ] **OpenCode adapter** -- E2E test with real opencode binary in the sandbox. Requires opencode installed in the CI runner or a sandbox image with node/npm pre-installed. Blocked: Foreman's distroless image doesn't have npx for Verify().
+- [X] **OpenCode adapter** -- E2E test with real opencode binary in the sandbox (`TestE2E_OpenCodeAdapter`). Uses mock LLM server to avoid API keys, separate agent image with npm-installed opencode-ai, and a sandbox image with no ENTRYPOINT.
 
 - [ ] **GitHub App webhook** -- send a signed webhook payload to `/api/v1/webhooks/github`, verify it is processed. Requires real GitHub App credentials in CI secrets.
 
