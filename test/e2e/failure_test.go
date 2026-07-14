@@ -139,15 +139,6 @@ func newComposeStack(t *testing.T) *composeStack {
 	return s
 }
 
-func (s *composeStack) build() {
-	s.t.Log("Building Foreman image...")
-	cmd := exec.Command("docker", append(s.composeArgs, "build")...)
-	cmd.Dir = s.composeDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		s.t.Fatalf("docker compose build: %v\n%s", err, out)
-	}
-}
-
 func (s *composeStack) up() {
 	s.t.Log("Starting Foreman + Postgres...")
 	// Free port 5432 from any stale containers (previous test runs or manual
