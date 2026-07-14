@@ -147,6 +147,16 @@ func (s *composeStack) waitForStatus(sessionID string, timeout time.Duration, st
 	return ""
 }
 
+// restartForeman stops and restarts the Foreman container, simulating a crash + restart cycle.
+func (s *composeStack) restartForeman() {
+	s.t.Log("Restarting Foreman (simulating crash + restart)...")
+	cmd := exec.Command("docker", append(s.composeArgs, "restart", "foreman")...)
+	cmd.Dir = s.composeDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		s.t.Fatalf("docker compose restart foreman: %v\n%s", err, out)
+	}
+}
+
 // teardown stops and removes the compose stack.
 func (s *composeStack) teardown() {
 	if s.cleanedUp {
@@ -157,9 +167,18 @@ func (s *composeStack) teardown() {
 	// Dump logs before tearing down
 	s.dumpLogs()
 
-	cmd := exec.Command("docker", append(s.composeArgs, "down", "-t", "5")...)
-	cmd.Dir = s.composeDir
-	out, _ := cmd.CombinedOutput()
+	// Remove any leftover sandbox containers from this test run.
+	// These are created by Foreman at runtime, are not part of the compose stack,
+	// and accumulate across test runs interfering with subsequent tests.
+	cmd := exec.Command("sh", "-c", "docker rm -f $(docker ps -aq --filter name=foreman-sbox-) 2>/dev/null || true")
+	_ = cmd.Run()
+
+	// Remove volumes (-v) so each test starts with a clean Postgres database.
+	// Without this, stale session data from previous test runs causes
+	// duplicate key errors for hardcoded session IDs.
+	cmd2 := exec.Command("docker", append(s.composeArgs, "down", "-t", "5", "-v")...)
+	cmd2.Dir = s.composeDir
+	out, _ := cmd2.CombinedOutput()
 	s.t.Logf("docker compose down:\n%s", out)
 }
 
@@ -172,6 +191,43 @@ func (s *composeStack) runDocker(args ...string) ([]byte, error) {
 
 // composeStackWithConfig builds and starts a compose stack using a custom foreman.yaml.
 // Writes the config and a compose override to a temp directory.
+func TestE2E_SessionRecoveryOnRestart(t *testing.T) {
+	if !dockerComposeAvailable() {
+		t.Skip("Docker Compose not available")
+	}
+
+	// 1. Start compose
+	stack := newComposeStack(t)
+	defer stack.teardown()
+
+	// 2. Submit a task that runs long enough for a restart in the middle.
+	// Use a unique task_id so old DB state from previous runs doesn't conflict.
+	taskID := fmt.Sprintf("recovery-%d", time.Now().UnixNano())
+	sid := stack.submitTask(taskID, "sleep 20")
+
+	// 3. Wait for RUNNING (the sleep has started)
+	stack.waitForStatus(sid, 30*time.Second, "RUNNING", "FAILED")
+
+	// 4. Restart Foreman to simulate a crash. The sandbox keeps running but
+	//    Foreman loses its in-memory state. On restart Bootstrap recovers the
+	//    non-terminal session from PostgreSQL, provisions a new sandbox, and
+	//    re-runs the agent.
+	stack.restartForeman()
+
+	// 5. Wait for health (Foreman is back + recovery is in progress)
+	stack.waitForHealth()
+
+	// 6. Wait for the session to complete. The recovered session goes
+	//    ALLOCATING -> RUNNING -> COMPLETED. The task runs to completion
+	//    in the new sandbox.
+	status := stack.waitForStatus(sid, 90*time.Second, "COMPLETED", "FAILED")
+
+	// 7. Assert COMPLETED -- FAILED means recovery or agent execution broke
+	if status != "COMPLETED" {
+		t.Fatalf("expected COMPLETED after recovery, got %s", status)
+	}
+}
+
 func composeStackWithConfig(t *testing.T, customCfg string) *composeStack {
 	t.Helper()
 	ensureSigningKey(t)
@@ -251,15 +307,18 @@ func TestE2E_SandboxCrashDetection(t *testing.T) {
 		t.Fatal("session completed before sandbox could be killed")
 	}
 
-	// Find and kill the sandbox container
+	// Find and kill the sandbox container.
+	// Take the last (most recently created) container to avoid picking up
+	// orphaned sandbox containers from previous test runs.
 	out, err := stack.runDocker("ps", "--filter", "name=foreman-sbox-", "--format", "{{.ID}}")
 	if err != nil {
 		t.Fatalf("docker ps: %v", err)
 	}
-	containerID := strings.TrimSpace(string(out))
-	if containerID == "" {
+	containerIDs := strings.Fields(string(out))
+	if len(containerIDs) == 0 {
 		t.Fatal("no sandbox container found")
 	}
+	containerID := containerIDs[len(containerIDs)-1]
 	t.Logf("Killing sandbox container: %s", containerID)
 	if _, err := stack.runDocker("kill", containerID); err != nil {
 		t.Fatalf("docker kill: %v", err)

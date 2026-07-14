@@ -50,26 +50,16 @@ func (s *Server) RegisterRoute(method, path string, handler http.HandlerFunc) {
 	s.mux.HandleFunc(method+" "+path, handler)
 }
 
-// Start begins serving HTTP. Blocks until the server stops or ctx is cancelled.
-// Typically called in a goroutine.
+// Start begins serving HTTP in a background goroutine and returns immediately.
+// Graceful shutdown is handled by the caller via Shutdown.
 func (s *Server) Start(ctx context.Context) error {
-	// Register fallback health endpoint at root level if not already registered
-	// This is done lazily in Start so routes can be registered before.
-
-	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("api: listening on %s", s.cfg.ListenAddr)
 		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+			log.Printf("api: server error: %v", err)
 		}
 	}()
-
-	select {
-	case <-ctx.Done():
-		return s.Shutdown(context.Background())
-	case err := <-errCh:
-		return err
-	}
+	return nil
 }
 
 // Shutdown gracefully stops the HTTP server with the given timeout.

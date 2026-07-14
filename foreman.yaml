@@ -31,6 +31,8 @@ subsystems:
   coordinator:
     max_concurrent: 5
     default_timeout: 5m
+    heartbeat_interval: 5s
+    heartbeat_timeout: 15s
 
   # --- Agents ---
   # The first agent in the list is used for task execution.

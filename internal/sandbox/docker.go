@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -443,6 +444,7 @@ func (d *DockerSandbox) Heartbeat(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("container state is nil")
 	}
 	if inspect.State.Status != container.StateRunning {
+		log.Printf("sandbox: heartbeat FAIL for container %s (state=%s, id=%s)", sessionID, inspect.State.Status, cs.id)
 		return fmt.Errorf("container status is %s (expected running)", inspect.State.Status)
 	}
 	return nil

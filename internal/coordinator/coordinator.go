@@ -200,8 +200,10 @@ func (c *Coordinator) SubmitTask(ctx context.Context, taskID, description string
 }
 
 // ResumeSession restarts a session that was recovered after a restart.
-// It transitions the session back to ALLOCATING and launches a new agent.
-// The session must already exist in the ControlPlane (loaded by Recover).
+// The session is already in RUNNING state (recovered from DB), so it skips
+// the CREATED->ALLOCATING transition (which would be invalid from RUNNING)
+// and directly resolves tools and launches a new agent goroutine.
+// runAgent handles the RUNNING->RUNNING idempotency internally.
 func (c *Coordinator) ResumeSession(ctx context.Context, sessionID, description string) error {
 	c.mu.Lock()
 	if !c.accepting {
@@ -213,10 +215,6 @@ func (c *Coordinator) ResumeSession(ctx context.Context, sessionID, description 
 		return fmt.Errorf("max concurrent tasks reached (%d)", c.maxConcurrent)
 	}
 	c.mu.Unlock()
-
-	if err := c.cp.Transition(ctx, sessionID, schemas.StatusAllocating); err != nil {
-		return fmt.Errorf("transition to allocating: %w", err)
-	}
 
 	if _, err := c.mcpHub.ResolveTools(ctx, sessionID); err != nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("resolve tools: %w", err))
@@ -476,6 +474,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 // disabled (heartbeatInterval <= 0).
 func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID string, crashCh chan<- error, heartbeatCancel context.CancelFunc) {
 	if c.heartbeatInterval <= 0 {
+		log.Printf("coordinator: heartbeat disabled for session %s (interval=%v)", sessionID, c.heartbeatInterval)
 		return
 	}
 
@@ -485,6 +484,7 @@ func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID
 		maxFailures = 3
 	}
 
+	log.Printf("coordinator: heartbeat monitor started for session %s (interval=%v, timeout=%v, maxFailures=%d)", sessionID, interval, c.heartbeatTimeout, maxFailures)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -494,13 +494,14 @@ func (c *Coordinator) monitorHeartbeat(ctx context.Context, sessionID, sandboxID
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := c.sbox.Heartbeat(ctx, sandboxID); err != nil {
+			hbErr := c.sbox.Heartbeat(ctx, sandboxID)
+			if hbErr != nil {
 				consecutiveFailures++
 				log.Printf("coordinator: heartbeat %d/%d failed for session %s: %v",
-					consecutiveFailures, maxFailures, sessionID, err)
+					consecutiveFailures, maxFailures, sessionID, hbErr)
 				if consecutiveFailures >= maxFailures {
 					select {
-					case crashCh <- fmt.Errorf("heartbeat lost after %d failures: %w", consecutiveFailures, err):
+					case crashCh <- fmt.Errorf("heartbeat lost after %d failures: %w", consecutiveFailures, hbErr):
 					default:
 					}
 					heartbeatCancel() // interrupt the blocking sbox.Execute
@@ -670,8 +671,10 @@ func (c *Coordinator) ReapOrphanedContainers(ctx context.Context, activeSessions
 		if activeSessions[name] {
 			continue
 		}
-		log.Printf("coordinator: reaping orphaned container %s", name)
-		if dErr := c.sbox.Destroy(ctx, name); dErr != nil {
+		log.Printf("coordinator: reaping orphaned container %s (id=%s)", name, ctr.ID[:12])
+		// Use the Docker API directly -- Destroy requires the container
+		// to be in the in-memory sandbox map, which orphaned containers aren't.
+		if dErr := apiClient.ContainerRemove(ctx, ctr.ID, container.RemoveOptions{Force: true}); dErr != nil {
 			log.Printf("coordinator: reap container %s: %v", name, dErr)
 		}
 	}
