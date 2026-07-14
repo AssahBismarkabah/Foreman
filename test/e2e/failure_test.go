@@ -1,8 +1,12 @@
 package e2e
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,9 +18,58 @@ import (
 	"time"
 )
 
+// TestMain provides shared test infrastructure:
+//   - Builds the Foreman Docker image once and tags it as foreman:e2e (~10s saved per test)
+//   - Pre-pulls postgres:17-alpine so compose up doesn't block on image download
+//
+// Individual tests still start their own compose stacks with unique project
+// names for isolation, but skip the build step (image is shared by tag).
+func TestMain(m *testing.M) {
+	if !dockerComposeAvailable() {
+		fmt.Println("Docker Compose not available, skipping E2E tests")
+		os.Exit(0)
+	}
+
+	// Generate a signing key globally (required by all tests).
+	// This runs once instead of per-test (each call to ensureSigningKey).
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		fmt.Printf("Failed to generate signing key: %v\n", err)
+		os.Exit(1)
+	}
+	pemBlock := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}
+	if err := os.Setenv("FOREMAN_SIGNING_KEY", string(pem.EncodeToMemory(pemBlock))); err != nil {
+		fmt.Printf("Failed to set signing key: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Pre-pull postgres so docker compose up -d doesn't block on image download.
+	// This runs once before any test, not once per test.
+	if err := exec.Command("docker", "pull", "postgres:17-alpine").Run(); err != nil {
+		fmt.Printf("Warning: failed to pre-pull postgres:17-alpine (will pull during up): %v\n", err)
+	}
+
+	// Pre-build the Foreman image once with a fixed tag so every test's compose
+	// stack can reference it by name instead of rebuilding for each project.
+	// Using plain "docker build" rather than "docker compose build" because the
+	// latter tags with the project name, making it unreachable by other projects.
+	// Run from the deploy/ directory so Dockerfile path and build context align
+	// with how docker-compose.yml normally references them.
+	buildCmd := exec.Command("docker", "build", "-t", "foreman:e2e", "-f", "../Dockerfile", "..")
+	buildCmd.Dir = "../../deploy"
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		fmt.Printf("Failed to build Foreman image: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Foreman image (foreman:e2e) built successfully.")
+
+	os.Exit(m.Run())
+}
+
 // composeStack manages a Docker Compose instance for a single E2E test.
 // Each test creates its own stack so different configs can be used.
-// The Docker image is built only once (shared via build cache).
+// The Docker image is pre-built by TestMain and shared via build cache.
 type composeStack struct {
 	composeDir  string
 	composeArgs []string
@@ -32,22 +85,55 @@ func uniqueProjectName() string {
 	return fmt.Sprintf("foreman-e2e-%d", time.Now().UnixNano())
 }
 
+// replaceBuildWithImage reads the canonical docker-compose.yml from the deploy/
+// directory and returns a modified version that uses the pre-built foreman:e2e
+// image instead of building from the Dockerfile. This lets each test start its
+// compose stack without the ~10s per-test rebuild.
+func replaceBuildWithImage(src string) string {
+	return strings.Replace(src,
+		`    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${FOREMAN_VERSION:-dev}`,
+		`    image: foreman:e2e`, 1)
+}
+
 func newComposeStack(t *testing.T) *composeStack {
 	t.Helper()
-	ensureSigningKey(t)
 
 	projectName := uniqueProjectName()
-	composeDir := "../../deploy"
-	args := []string{"compose", "-p", projectName, "-f", "docker-compose.yml", "--profile", "service"}
+
+	// Read the canonical compose file from deploy/ and swap build: for the
+	// pre-built image. Fix the foreman.yaml volume path to an absolute path
+	// so it works regardless of the temp dir CWD.
+	src, err := os.ReadFile(filepath.Join("../../deploy", "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yml: %v", err)
+	}
+	modified := replaceBuildWithImage(string(src))
+	foremanCfg, err := filepath.Abs("../../foreman.yaml")
+	if err != nil {
+		t.Fatalf("resolve foreman.yaml path: %v", err)
+	}
+	modified = strings.ReplaceAll(modified, "../foreman.yaml", foremanCfg)
+
+	composeFile := filepath.Join(t.TempDir(), "docker-compose.yml")
+	if err := os.WriteFile(composeFile, []byte(modified), 0644); err != nil {
+		t.Fatalf("write temp docker-compose.yml: %v", err)
+	}
+
+	args := []string{"compose", "-p", projectName, "-f", composeFile, "--profile", "service"}
 
 	s := &composeStack{
-		composeDir:  composeDir,
+		composeDir:  filepath.Dir(composeFile),
 		composeArgs: args,
 		projectName: projectName,
 		t:           t,
 	}
 
-	s.build()
+	// build() is intentionally omitted here -- the image was pre-built by
+	// TestMain and tagged as foreman:e2e so compose up -d uses it directly.
 	s.up()
 	s.waitForHealth()
 	return s
@@ -376,17 +462,40 @@ func TestE2E_SessionRecoveryOnRestart(t *testing.T) {
 
 func composeStackWithConfig(t *testing.T, customCfg string) *composeStack {
 	t.Helper()
-	ensureSigningKey(t)
 
 	projectName := uniqueProjectName()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "foreman.yaml")
+	composePath := filepath.Join(tmpDir, "docker-compose.yml")
 	overridePath := filepath.Join(tmpDir, "compose-override.yml")
+
+	// Generate a compose file that uses the pre-built foreman:e2e image
+	// instead of building from Dockerfile.
+	src, err := os.ReadFile(filepath.Join("../../deploy", "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yml: %v", err)
+	}
+	modified := replaceBuildWithImage(string(src))
+	// The canonical compose file's volume mount (../foreman.yaml) is relative
+	// to deploy/.  Since we write to a temp dir, swap for the absolute path
+	// so the override below can replace it with the custom config path.
+	foremanCfg, err := filepath.Abs("../../foreman.yaml")
+	if err != nil {
+		t.Fatalf("resolve foreman.yaml path: %v", err)
+	}
+	modified = strings.ReplaceAll(modified, "../foreman.yaml", foremanCfg)
+
+	if err := os.WriteFile(composePath, []byte(modified), 0644); err != nil {
+		t.Fatalf("write docker-compose.yml: %v", err)
+	}
 
 	if err := os.WriteFile(cfgPath, []byte(customCfg), 0644); err != nil {
 		t.Fatalf("write custom config: %v", err)
 	}
 
+	// Override the base compose file's volume mount with the custom config.
+	// This replaces the ../foreman.yaml mount (which we fixed to an absolute
+	// path above) since they share the same target /etc/foreman/foreman.yaml.
 	override := fmt.Sprintf(`services:
   foreman:
     volumes:
@@ -396,22 +505,21 @@ func composeStackWithConfig(t *testing.T, customCfg string) *composeStack {
 		t.Fatalf("write compose override: %v", err)
 	}
 
-	composeDir := "../../deploy"
 	args := []string{"compose",
 		"-p", projectName,
-		"-f", "docker-compose.yml",
+		"-f", composePath,
 		"-f", overridePath,
 		"--profile", "service",
 	}
 
 	s := &composeStack{
-		composeDir:  composeDir,
+		composeDir:  tmpDir,
 		composeArgs: args,
 		projectName: projectName,
 		t:           t,
 	}
 
-	s.build()
+	// build() is omitted -- the image was pre-built by TestMain.
 	s.up()
 	s.waitForHealth()
 	return s
@@ -853,20 +961,20 @@ func TestE2E_MultipleConcurrentTasks(t *testing.T) {
 	defer stack.teardown()
 
 	// Submit 2 tasks that should be accepted (202)
-	status1, body1 := stack.submitTaskStatus("concurrent-1", "sleep 10")
+	status1, body1 := stack.submitTaskStatus("concurrent-1", "sleep 5")
 	if status1 != http.StatusAccepted {
 		t.Fatalf("expected 202 for 1st task, got %d: %s", status1, body1)
 	}
 	t.Log("1st task accepted (202)")
 
-	status2, body2 := stack.submitTaskStatus("concurrent-2", "sleep 10")
+	status2, body2 := stack.submitTaskStatus("concurrent-2", "sleep 5")
 	if status2 != http.StatusAccepted {
 		t.Fatalf("expected 202 for 2nd task, got %d: %s", status2, body2)
 	}
 	t.Log("2nd task accepted (202)")
 
 	// 3rd task should be rejected with 429 Too Many Requests
-	status3, body3 := stack.submitTaskStatus("concurrent-3", "sleep 10")
+	status3, body3 := stack.submitTaskStatus("concurrent-3", "sleep 5")
 	if status3 != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 for 3rd task (max concurrent), got %d: %s", status3, body3)
 	}
@@ -876,7 +984,7 @@ func TestE2E_MultipleConcurrentTasks(t *testing.T) {
 	t.Log("3rd task correctly rejected with 429")
 
 	// First 2 tasks should complete successfully
-	stack.waitForStatus("ses_concurrent-1", 60*time.Second, "COMPLETED", "FAILED")
-	stack.waitForStatus("ses_concurrent-2", 60*time.Second, "COMPLETED", "FAILED")
+	stack.waitForStatus("ses_concurrent-1", 30*time.Second, "COMPLETED", "FAILED")
+	stack.waitForStatus("ses_concurrent-2", 30*time.Second, "COMPLETED", "FAILED")
 	t.Log("SUCCESS: Concurrent task limits correctly enforced.")
 }
