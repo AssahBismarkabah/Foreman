@@ -11,7 +11,6 @@ x-logging: &default-logging
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: foreman-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${FOREMAN_PG_USER:-foreman}
@@ -33,7 +32,6 @@ services:
   nats:
     profiles: ["nats"]
     image: nats:2.10-alpine
-    container_name: foreman-nats
     restart: unless-stopped
     ports:
       - "${FOREMAN_NATS_PORT:-4222}:4222"
@@ -53,7 +51,6 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: ${FOREMAN_VERSION:-dev}
-    container_name: foreman
     user: root:root
     restart: unless-stopped
     ports:

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/foreman/foreman/internal/adapter"
@@ -257,7 +258,11 @@ func handleSubmitTask(co *coordinator.Coordinator) http.HandlerFunc {
 
 		if err := co.SubmitTask(context.Background(), req.TaskID, req.Description); err != nil {
 			log.Printf("api: submit task %s: %v", req.TaskID, err)
-			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "max concurrent tasks reached") {
+				status = http.StatusTooManyRequests
+			}
+			http.Error(w, `{"error":"`+err.Error()+`"}`, status)
 			return
 		}
 

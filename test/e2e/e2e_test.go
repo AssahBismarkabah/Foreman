@@ -61,8 +61,9 @@ func TestE2E_ForemanStartTaskComplete(t *testing.T) {
 	}
 	ensureSigningKey(t)
 
+	projectName := fmt.Sprintf("foreman-e2e-%d", time.Now().UnixNano())
 	composeDir := "../../deploy"
-	composeArgs := []string{"compose", "-f", "docker-compose.yml", "--profile", "service"}
+	composeArgs := []string{"compose", "-p", projectName, "-f", "docker-compose.yml", "--profile", "service"}
 
 	// --- Build and start Foreman ---
 	t.Log("Building Foreman image...")

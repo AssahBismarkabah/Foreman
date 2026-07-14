@@ -118,21 +118,21 @@ Goal: Every built feature has an automated E2E test proving it works through the
 
 - [X] **Approval gate flow** -- configure policy that requires approval for tool_use, submit task, verify session blocks on APPROVAL, approve via API, verify session completes (`TestE2E_ApprovalGateFlow`).
 
-- [ ] **Graceful shutdown with drain** -- submit task, send SIGTERM, verify Foreman waits for running task to finish before exiting, verify session reaches terminal state.
+- [X] **Graceful shutdown with drain** -- submit task, send SIGTERM, verify Foreman waits for running task to finish before exiting, verify session reaches terminal state (`TestE2E_GracefulShutdown`).
 
-- [ ] **NATS event bus** -- repeat the E2E test with `eventbus.kind: nats` instead of memory. Verify events survive publish before subscribe (JetStream durability).
+- [X] **NATS event bus** -- repeat the E2E test with `eventbus.kind: nats` (embedded) instead of memory. Verify events survive publish before subscribe (JetStream durability) (`TestE2E_NATSEventBus`).
 
-- [ ] **OpenCode adapter** -- E2E test with real opencode binary in the sandbox. Requires opencode installed in the CI runner.
+- [X] **Identity / scoped tokens** -- submit task, verify `FOREMAN_AGENT_TOKEN` is injected into the sandbox via `docker exec`, verify the token is a valid JWT with correct claims (`TestE2E_IdentityScopedToken`).
 
-- [ ] **Identity / scoped tokens** -- submit task, verify `FOREMAN_AGENT_TOKEN` is injected into the sandbox, verify the token is a valid JWT with correct claims. Verify JWKS endpoint returns the signing key.
+- [X] **Multiple concurrent tasks** -- submit N tasks (N > max_concurrent), verify only N run and the rest are rejected with 429 (`TestE2E_MultipleConcurrentTasks`).
+
+- [ ] **OpenCode adapter** -- E2E test with real opencode binary in the sandbox. Requires opencode installed in the CI runner or a sandbox image with node/npm pre-installed. Blocked: Foreman's distroless image doesn't have npx for Verify().
 
 - [ ] **GitHub App webhook** -- send a signed webhook payload to `/api/v1/webhooks/github`, verify it is processed. Requires real GitHub App credentials in CI secrets.
 
 - [ ] **Slack plugin** -- verify slash command, button interaction, and DM handling. Requires real Slack credentials in CI secrets.
 
 - [ ] **Discord plugin** -- verify slash command, button interaction, and DM handling. Requires real Discord credentials in CI secrets.
-
-- [ ] **Multiple concurrent tasks** -- submit N tasks (N > max_concurrent), verify only N run and the rest are rejected or queued.
 
 ---
 
