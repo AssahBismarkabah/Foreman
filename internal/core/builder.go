@@ -215,6 +215,8 @@ func newAPIServer(ctx context.Context, cfg *config.Config, _ eventbus.EventBus, 
 	if co != nil {
 		srv.RegisterRoute("POST", "/api/v1/tasks", handleSubmitTask(co))
 		srv.RegisterRoute("GET", "/api/v1/sessions/{id}", handleGetSession(co))
+		srv.RegisterRoute("POST", "/api/v1/sessions/{id}/approve", handleApproveSession(co))
+		srv.RegisterRoute("POST", "/api/v1/sessions/{id}/deny", handleDenySession(co))
 	}
 
 	// GitHub App webhook
@@ -284,6 +286,79 @@ func handleGetSession(co *coordinator.Coordinator) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(info)
+	}
+}
+
+// handleApproveSession returns an HTTP handler that approves a session waiting at the approval gate.
+// Request body (optional): {"user_id": "..."}
+// Response 200: {"status":"approved"}
+func handleApproveSession(co *coordinator.Coordinator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, `{"error":"session id is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		userID := "api-user"
+		var req struct {
+			UserID string `json:"user_id"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&req)
+		}
+		if req.UserID != "" {
+			userID = req.UserID
+		}
+
+		if err := co.ApproveSession(r.Context(), sessionID, userID); err != nil {
+			log.Printf("api: approve session %s: %v", sessionID, err)
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"status":"approved"}`)
+	}
+}
+
+// handleDenySession returns an HTTP handler that denies a session waiting at the approval gate.
+// Request body (optional): {"user_id": "...", "reason": "..."}
+// Response 200: {"status":"denied"}
+func handleDenySession(co *coordinator.Coordinator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, `{"error":"session id is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		userID := "api-user"
+		reason := "denied via API"
+		var req struct {
+			UserID string `json:"user_id"`
+			Reason string `json:"reason"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&req)
+		}
+		if req.UserID != "" {
+			userID = req.UserID
+		}
+		if req.Reason != "" {
+			reason = req.Reason
+		}
+
+		if err := co.DenySession(r.Context(), sessionID, userID, reason); err != nil {
+			log.Printf("api: deny session %s: %v", sessionID, err)
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"status":"denied"}`)
 	}
 }
 

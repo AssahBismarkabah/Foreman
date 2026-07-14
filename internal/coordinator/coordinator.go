@@ -102,6 +102,9 @@ func New(
 	if jitter <= 0 {
 		jitter = 1 * time.Second
 	}
+	if maxConcurrent <= 0 {
+		maxConcurrent = 1
+	}
 	return &Coordinator{
 		bus:                bus,
 		cp:                 cp,
@@ -430,6 +433,15 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		c.publishApprovalRequest(ctx, sessionID, matched)
 		if err := c.waitForApproval(ctx, sessionID, matched[0].Policy.DefaultTimeout()); err != nil {
 			c.failSession(ctx, sessionID, fmt.Errorf("approval: %w", err))
+			c.cleanupSandbox(ctx, sandboxID)
+			return
+		}
+	}
+
+	// If the session was in APPROVAL, transition back through RUNNING first.
+	if s, ok := c.cp.GetSession(sessionID); ok && s.Status == schemas.StatusApproval {
+		if err := c.cp.Transition(ctx, sessionID, schemas.StatusRunning); err != nil {
+			log.Printf("coordinator: transition to running after approval: %v", err)
 			c.cleanupSandbox(ctx, sandboxID)
 			return
 		}
@@ -862,6 +874,31 @@ func (c *Coordinator) waitForApproval(ctx context.Context, sessionID string, tim
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// ApproveSession publishes an approval.granted event for the given session.
+// This unblocks waitForApproval so the session can continue to COMPLETED.
+func (c *Coordinator) ApproveSession(ctx context.Context, sessionID, userID string) error {
+	evt := schemas.Event{
+		ID:        fmt.Sprintf("app_%s_%d", sessionID, time.Now().UnixNano()),
+		Type:      schemas.EvApprovalGranted,
+		SessionID: sessionID,
+		Timestamp: time.Now(),
+		Payload:   map[string]string{"user_id": userID},
+	}
+	return c.bus.Publish(ctx, schemas.Subject("approval", sessionID, "granted"), evt)
+}
+
+// DenySession publishes an approval.denied event for the given session.
+func (c *Coordinator) DenySession(ctx context.Context, sessionID, userID, reason string) error {
+	evt := schemas.Event{
+		ID:        fmt.Sprintf("app_%s_%d", sessionID, time.Now().UnixNano()),
+		Type:      schemas.EvApprovalDenied,
+		SessionID: sessionID,
+		Timestamp: time.Now(),
+		Payload:   map[string]string{"user_id": userID, "reason": reason},
+	}
+	return c.bus.Publish(ctx, schemas.Subject("approval", sessionID, "denied"), evt)
 }
 
 // extractUserID pulls a user_id from a payload that may be a map or a string.

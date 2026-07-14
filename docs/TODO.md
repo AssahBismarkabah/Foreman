@@ -114,9 +114,9 @@ Goal: Every built feature has an automated E2E test proving it works through the
   - [X] agent non-zero exit -> FAILED (`TestE2E_AgentNonZeroExit`)
   - [X] agent crash + container kill -> FAILED (`TestE2E_SandboxCrashDetection`)
 
-- [ ] **Session recovery on restart** -- start Foreman, submit task, kill Foreman mid-task, restart, verify session resumes (runs at COMPLETED). Uses Docker Compose restart, polls HTTP API.
+- [X] **Session recovery on restart** -- start Foreman, submit task, kill Foreman mid-task, restart, verify session resumes (runs at COMPLETED). Uses Docker Compose restart, polls HTTP API.
 
-- [ ] **Approval gate flow** -- configure policy that requires approval for `echo`, submit task, verify session blocks on APPROVAL, submit approval response, verify session completes.
+- [X] **Approval gate flow** -- configure policy that requires approval for tool_use, submit task, verify session blocks on APPROVAL, approve via API, verify session completes (`TestE2E_ApprovalGateFlow`).
 
 - [ ] **Graceful shutdown with drain** -- submit task, send SIGTERM, verify Foreman waits for running task to finish before exiting, verify session reaches terminal state.
 

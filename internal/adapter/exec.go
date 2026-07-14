@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -57,10 +58,22 @@ func (a *ExecAdapter) StartCommand(_ context.Context, config map[string]any) ([]
 	return []string{a.cmd, "-c", task}, nil
 }
 
-// ParseEvent returns the raw line as a text event.
+// ParseEvent returns the raw line as a text event, or as parsed JSON when the
+// line is a tool_use event. This allows the exec adapter to trigger policy
+// approval gates during E2E tests.
 func (a *ExecAdapter) ParseEvent(_ context.Context, line []byte) (any, error) {
 	if len(line) == 0 {
 		return nil, nil
+	}
+	// If the line is valid JSON with a "tool_use" type, return it as a map so
+	// the coordinator's extractToolUse can match it against approval policies.
+	if len(line) > 0 && line[0] == '{' {
+		var parsed map[string]any
+		if err := json.Unmarshal(line, &parsed); err == nil {
+			if typ, ok := parsed["type"].(string); ok && typ == "tool_use" {
+				return parsed, nil
+			}
+		}
 	}
 	return map[string]string{"type": "text", "text": string(line)}, nil
 }

@@ -86,17 +86,30 @@ func (s *composeStack) dumpLogs() {
 
 func (s *composeStack) submitTask(taskID, description string) string {
 	s.t.Helper()
-	payload := fmt.Sprintf(`{"task_id":"%s","description":"%s"}`, taskID, description)
+
+	// Use proper JSON encoding to handle descriptions containing special characters
+	reqBody := struct {
+		TaskID      string `json:"task_id"`
+		Description string `json:"description"`
+	}{
+		TaskID:      taskID,
+		Description: description,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		s.t.Fatalf("marshal submit body: %v", err)
+	}
+
 	resp, err := http.Post("http://localhost:8080/api/v1/tasks", "application/json",
-		strings.NewReader(payload))
+		strings.NewReader(string(payload)))
 	if err != nil {
 		s.t.Fatalf("POST /api/v1/tasks: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		s.t.Fatalf("expected 202, got %d: %s", resp.StatusCode, body)
+		respBody, _ := io.ReadAll(resp.Body)
+		s.t.Fatalf("expected 202, got %d: %s", resp.StatusCode, respBody)
 	}
 
 	var result struct {
@@ -196,8 +209,48 @@ func TestE2E_SessionRecoveryOnRestart(t *testing.T) {
 		t.Skip("Docker Compose not available")
 	}
 
-	// 1. Start compose
-	stack := newComposeStack(t)
+	// Use a longer heartbeat_timeout so the restart downtime doesn't cause the
+	// recovered session to be marked as stale and failed during bootstrap.
+	recoveryCfg := `subsystems:
+  coordinator:
+    max_concurrent: 5
+    heartbeat_interval: 5s
+    heartbeat_timeout: 120s
+  sandbox:
+    kind: docker
+    image: ubuntu:22.04
+  eventbus:
+    kind: memory
+  statestore:
+    kind: postgres
+    dsn: postgres://foreman:foreman@localhost:5432/foreman?sslmode=disable
+    max_connections: 25
+    min_connections: 5
+  agents:
+    - name: exec
+      kind: exec
+      cmd: sh
+      cwd: /workspace
+      heartbeat_timeout: 60s
+  mcphub:
+    servers:
+      - name: filesystem
+        transport: stdio
+        command: npx
+        args:
+          - "@modelcontextprotocol/server-filesystem"
+          - /tmp
+  identity:
+    api:
+      listen_addr: ":8080"
+    signing_key:
+      source: env
+      env_var_name: FOREMAN_SIGNING_KEY
+      key_id: foreman-1
+`
+
+	// 1. Start compose with custom config
+	stack := composeStackWithConfig(t, recoveryCfg)
 	defer stack.teardown()
 
 	// 2. Submit a task that runs long enough for a restart in the middle.
@@ -330,6 +383,90 @@ func TestE2E_SandboxCrashDetection(t *testing.T) {
 		t.Fatalf("expected FAILED after sandbox crash, got %s", status)
 	}
 	t.Log("SUCCESS: Sandbox crash correctly detected and session marked FAILED.")
+}
+
+func TestE2E_ApprovalGateFlow(t *testing.T) {
+	if !dockerComposeAvailable() {
+		t.Skip("Docker Compose not available")
+	}
+
+	// Config with exec adapter and a policy that requires approval for "write" tool.
+	// The policy timeout is short (60s) to keep the test fast.
+	customCfg := `
+subsystems:
+  eventbus:
+    kind: memory
+  statestore:
+    kind: postgres
+    dsn: "postgres://foreman:foreman@postgres:5432/foreman?sslmode=disable"
+    max_connections: 25
+    min_connections: 5
+  sandbox:
+    kind: docker
+    image: alpine:latest
+  coordinator:
+    max_concurrent: 5
+    default_timeout: 5m
+    heartbeat_interval: 5s
+    heartbeat_timeout: 15s
+    policies:
+      - name: require-approval-for-write
+        match:
+          tool: write
+        action: require_approval
+        timeout: 60s
+  agents:
+    - name: exec
+      kind: exec
+      cmd: /bin/sh
+      cwd: /tmp
+      heartbeat_interval: 30s
+      heartbeat_timeout: 90s
+  identity:
+    api:
+      listen_addr: ":8080"
+      public_url: "http://localhost:8080"
+    signing_key:
+      source: env
+      env_var_name: FOREMAN_SIGNING_KEY
+      key_id: foreman-1
+`
+	stack := composeStackWithConfig(t, customCfg)
+	defer stack.teardown()
+
+	// Submit a task whose stdout contains a tool_use JSON line.
+	// The exec adapter's ParseEvent extracts this as a tool_use event,
+	// the policy matches on tool "write", and the session enters APPROVAL.
+	sid := stack.submitTask("approval_gate",
+		`echo '{"type":"tool_use","name":"write","part":{"tool":"write","state":{}}}'`)
+
+	// Wait for APPROVAL status (session blocked at approval gate)
+	status := stack.waitForStatus(sid, 30*time.Second, "APPROVAL", "FAILED", "COMPLETED")
+	if status == "FAILED" || status == "COMPLETED" {
+		t.Fatalf("expected APPROVAL, got %s", status)
+	}
+	t.Logf("Session reached APPROVAL as expected")
+
+	// Approve the session via API
+	t.Log("Approving session via API...")
+	approveURL := "http://localhost:8080/api/v1/sessions/" + sid + "/approve"
+	resp, err := http.Post(approveURL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST %s: %v", approveURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 on approve, got %d: %s", resp.StatusCode, body)
+	}
+	t.Log("Session approved, waiting for COMPLETED...")
+
+	// Wait for COMPLETED
+	status = stack.waitForStatus(sid, 30*time.Second, "COMPLETED", "FAILED")
+	if status != "COMPLETED" {
+		t.Fatalf("expected COMPLETED after approval, got %s", status)
+	}
+	t.Log("SUCCESS: Approval gate flow validated.")
 }
 
 func TestE2E_AdapterVerifyFailure(t *testing.T) {
