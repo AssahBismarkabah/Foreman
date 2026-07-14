@@ -454,7 +454,7 @@ subsystems:
 	if err != nil {
 		t.Fatalf("POST %s: %v", approveURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 200 on approve, got %d: %s", resp.StatusCode, body)
