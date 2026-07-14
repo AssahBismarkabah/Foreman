@@ -254,17 +254,18 @@ func (s *composeStack) startForeman() {
 }
 
 // findSandboxContainer returns the most recently created sandbox container ID.
+// Uses --last 1 to guarantee we get only the newest container, avoiding
+// stale containers from previous test runs.
 func (s *composeStack) findSandboxContainer() string {
-	out, err := s.runDocker("ps", "--filter", "name=foreman-sbox-", "--format", "{{.ID}}")
+	out, err := s.runDocker("ps", "-n", "1", "--filter", "name=foreman-sbox-", "--format", "{{.ID}}")
 	if err != nil {
 		s.t.Fatalf("docker ps: %v", err)
 	}
-	containerIDs := strings.Fields(string(out))
-	if len(containerIDs) == 0 {
+	id := strings.TrimSpace(string(out))
+	if id == "" {
 		s.t.Fatal("no sandbox container found")
 	}
-	// Most recently created last
-	return containerIDs[len(containerIDs)-1]
+	return id
 }
 
 // submitTaskStatus submits a task and returns the HTTP status code and response body.
@@ -456,17 +457,15 @@ func TestE2E_SandboxCrashDetection(t *testing.T) {
 	}
 
 	// Find and kill the sandbox container.
-	// Take the last (most recently created) container to avoid picking up
-	// orphaned sandbox containers from previous test runs.
-	out, err := stack.runDocker("ps", "--filter", "name=foreman-sbox-", "--format", "{{.ID}}")
+	// Use --last 1 to get the newest container, avoiding picking up stale ones.
+	out, err := stack.runDocker("ps", "-n", "1", "--filter", "name=foreman-sbox-", "--format", "{{.ID}}")
 	if err != nil {
 		t.Fatalf("docker ps: %v", err)
 	}
-	containerIDs := strings.Fields(string(out))
-	if len(containerIDs) == 0 {
+	containerID := strings.TrimSpace(string(out))
+	if containerID == "" {
 		t.Fatal("no sandbox container found")
 	}
-	containerID := containerIDs[len(containerIDs)-1]
 	t.Logf("Killing sandbox container: %s", containerID)
 	if _, err := stack.runDocker("kill", containerID); err != nil {
 		t.Fatalf("docker kill: %v", err)
@@ -739,17 +738,29 @@ func TestE2E_IdentityScopedToken(t *testing.T) {
 		t.Fatalf("expected RUNNING, got %s", status)
 	}
 
-	// Find the sandbox container and read the scoped agent token
+	// Find the sandbox container and read the scoped agent token.
+	// Use docker inspect to read the container's env vars without needing to
+	// exec into the container (which could interfere with the running agent).
 	containerID := stack.findSandboxContainer()
 	t.Logf("Sandbox container: %s", containerID)
 
-	out, err := stack.runDocker("exec", containerID, "sh", "-c", "echo $FOREMAN_AGENT_TOKEN")
+	out, err := stack.runDocker("inspect", containerID, "--format", "{{json .Config.Env}}")
 	if err != nil {
-		t.Fatalf("docker exec read token: %v\n%s", err, out)
+		t.Fatalf("docker inspect: %v\n%s", err, out)
 	}
-	token := strings.TrimSpace(string(out))
+	var envVars []string
+	if err := json.Unmarshal(out, &envVars); err != nil {
+		t.Fatalf("unmarshal env vars: %v", err)
+	}
+	var token string
+	for _, e := range envVars {
+		if strings.HasPrefix(e, "FOREMAN_AGENT_TOKEN=") {
+			token = strings.TrimPrefix(e, "FOREMAN_AGENT_TOKEN=")
+			break
+		}
+	}
 	if token == "" {
-		t.Fatal("FOREMAN_AGENT_TOKEN is empty or not set")
+		t.Fatal("FOREMAN_AGENT_TOKEN is empty or not set in container environment")
 	}
 	t.Logf("Token found (len=%d)", len(token))
 
