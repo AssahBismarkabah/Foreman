@@ -1,0 +1,40 @@
+@startuml
+!theme plain
+skinparam backgroundColor white
+skinparam shadowing false
+left to right direction
+
+title Foreman Deployment Architecture
+
+cloud "Slack / Discord\n(User Interface)" as UI
+
+rectangle "AWS Cloud (us-east-1)" as AWS {
+  rectangle "VPC" as VPC {
+    rectangle "Security Group" as SG {
+      rectangle "EC2 Spot Instance\nt4g.small (Graviton2 ARM)\n2 vCPU / 2 GB RAM\n20 GB gp3 EBS\nAmazon Linux 2023\n~$6/mo" as EC2
+    }
+  }
+}
+
+rectangle "Foreman on EC2" as Foreman {
+  rectangle "Foreman Binary\n(Go, :8080)" as ForemanBin
+  rectangle "Docker Daemon" as Docker
+  rectangle "Agent Sandbox\n(opencode / exec)" as Sandbox1
+  rectangle "Agent Sandbox\n(opencode / exec)" as Sandbox2
+}
+
+database "Neon PostgreSQL\n(Free tier, $0/mo)" as Neon
+rectangle "GitHub\n(GHCR + Code)" as GitHub
+
+UI --> ForemanBin : commands & reports\n(Socket Mode / Gateway API)
+
+ForemanBin --> Neon : state persistence\n(PostgreSQL, TLS)
+ForemanBin --> Docker : create sandboxes\n(/var/run/docker.sock)
+Docker --> Sandbox1 : spawn container
+Docker --> Sandbox2 : spawn container
+
+ForemanBin --> GitHub : pull code, push results
+
+GitHub --> EC2 : deploy via\nGitHub Actions
+
+@enduml
