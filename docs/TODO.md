@@ -128,11 +128,11 @@ Goal: Every built feature has an automated E2E test proving it works through the
 
 - [X] **OpenCode adapter** -- E2E test with real opencode binary in the sandbox (`TestE2E_OpenCodeAdapter`). Uses mock LLM server to avoid API keys, separate agent image with npm-installed opencode-ai, and a sandbox image with no ENTRYPOINT.
 
-- [ ] **GitHub App webhook** -- send a signed webhook payload to `/api/v1/webhooks/github`, verify it is processed. Requires real GitHub App credentials in CI secrets.
+- [X] **GitHub App webhook** -- E2E test sending signed fixture payloads to `/api/v1/webhooks/github`, verifying routing + signature verification + method check (`TestE2E_GitHubWebhook`). No real credentials needed.
 
-- [ ] **Slack plugin** -- verify slash command, button interaction, and DM handling. Requires real Slack credentials in CI secrets.
+- [X] **Slack plugin** -- integration tests for slash command, approve/deny buttons, app_mention, DMs, and non-DM filtering. Uses `slacktest.NewTestServer()` mock HTTP server + `socketmode.Client.Events` channel injection. No real credentials needed.
 
-- [ ] **Discord plugin** -- verify slash command, button interaction, and DM handling. Requires real Discord credentials in CI secrets.
+- [X] **Discord plugin** -- integration tests for slash command, approve/deny buttons, DMs, own-message filtering, and non-DM filtering. Uses `httptest.NewServer` mock HTTP server + `discordgo.Session.Client` transport swap. No real credentials needed.
 
 ---
 
