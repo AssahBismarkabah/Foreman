@@ -112,6 +112,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Bootstrap Terraform state backend
+        run: |
+          # Create S3 bucket if it doesn't exist
+          aws s3api create-bucket \
+            --bucket foreman-terraform-state-571075516563 \
+            --region us-east-1 2>/dev/null || echo "Bucket already exists"
+          aws s3api put-bucket-versioning \
+            --bucket foreman-terraform-state-571075516563 \
+            --versioning-configuration Status=Enabled 2>/dev/null || true
+          # Create DynamoDB lock table if it doesn't exist
+          aws dynamodb create-table \
+            --table-name foreman-terraform-locks \
+            --attribute-definitions AttributeName=LockID,AttributeType=S \
+            --key-schema AttributeName=LockID,KeyType=HASH \
+            --billing-mode PAY_PER_REQUEST 2>/dev/null && echo "Lock table created" || echo "Lock table already exists"
+
       - name: Terraform init
         run: terraform init
 
@@ -164,6 +180,20 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Bootstrap Terraform state backend
+        run: |
+          aws s3api create-bucket \
+            --bucket foreman-terraform-state-571075516563 \
+            --region us-east-1 2>/dev/null || echo "Bucket already exists"
+          aws s3api put-bucket-versioning \
+            --bucket foreman-terraform-state-571075516563 \
+            --versioning-configuration Status=Enabled 2>/dev/null || true
+          aws dynamodb create-table \
+            --table-name foreman-terraform-locks \
+            --attribute-definitions AttributeName=LockID,AttributeType=S \
+            --key-schema AttributeName=LockID,KeyType=HASH \
+            --billing-mode PAY_PER_REQUEST 2>/dev/null && echo "Lock table created" || echo "Lock table already exists"
 
       - name: Terraform init
         run: terraform init
@@ -281,6 +311,20 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Bootstrap Terraform state backend
+        run: |
+          aws s3api create-bucket \
+            --bucket foreman-terraform-state-571075516563 \
+            --region us-east-1 2>/dev/null || echo "Bucket already exists"
+          aws s3api put-bucket-versioning \
+            --bucket foreman-terraform-state-571075516563 \
+            --versioning-configuration Status=Enabled 2>/dev/null || true
+          aws dynamodb create-table \
+            --table-name foreman-terraform-locks \
+            --attribute-definitions AttributeName=LockID,AttributeType=S \
+            --key-schema AttributeName=LockID,KeyType=HASH \
+            --billing-mode PAY_PER_REQUEST 2>/dev/null && echo "Lock table created" || echo "Lock table already exists"
 
       - name: Terraform init
         run: terraform init
