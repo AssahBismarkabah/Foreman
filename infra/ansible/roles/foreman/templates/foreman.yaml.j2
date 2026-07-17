@@ -1,0 +1,58 @@
+# Foreman Configuration - Managed by Ansible
+# {{ ansible_managed }}
+# Do not edit manually.
+
+subsystems:
+  eventbus:
+    kind: memory
+
+  statestore:
+    kind: postgres
+    dsn: "{{ foreman_pg_dsn }}"
+    max_connections: 25
+    min_connections: 5
+
+  sandbox:
+    kind: docker
+    image: ubuntu:22.04
+
+  coordinator:
+    max_concurrent: 5
+    default_timeout: 5m
+    heartbeat_interval: 5s
+    heartbeat_timeout: 15s
+
+  agents:
+    - name: exec
+      kind: exec
+      cmd: sh
+      cwd: /workspace
+      heartbeat_timeout: 60s
+    - name: opencode
+      kind: opencode
+      cmd: npx opencode
+      cwd: /tmp/opencode-workspace
+      heartbeat_interval: 30s
+      heartbeat_timeout: 90s
+
+{% if slack_bot_token | length > 0 and slack_app_token | length > 0 or discord_bot_token | length > 0 %}
+  plugins:
+{% if slack_bot_token | length > 0 and slack_app_token | length > 0 %}
+    slack:
+      bot_token: "{{ slack_bot_token }}"
+      app_token: "{{ slack_app_token }}"
+{% endif %}
+{% if discord_bot_token | length > 0 %}
+    discord:
+      bot_token: "{{ discord_bot_token }}"
+{% endif %}
+{% endif %}
+
+  identity:
+    api:
+      listen_addr: ":{{ foreman_api_port }}"
+      public_url: "http://localhost:{{ foreman_api_port }}"
+    signing_key:
+      source: env
+      env_var_name: FOREMAN_SIGNING_KEY
+      key_id: foreman-1

@@ -1,0 +1,69 @@
+---
+# Foreman configuration and deployment role
+
+- name: Create Foreman directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ foreman_config_dir }}"
+    - "{{ foreman_data_dir }}"
+
+- name: Create environment file with signing key
+  copy:
+    content: |
+      {% if foreman_signing_key | length > 0 %}FOREMAN_SIGNING_KEY={{ foreman_signing_key }}{% endif %}
+    dest: "{{ foreman_config_dir }}/env"
+    mode: "0600"
+  notify: restart foreman
+
+- name: Deploy Foreman configuration
+  template:
+    src: foreman.yaml.j2
+    dest: "{{ foreman_config_dir }}/foreman.yaml"
+    mode: "0644"
+  notify: restart foreman
+
+- name: Deploy Foreman systemd service
+  template:
+    src: foreman.service.j2
+    dest: /etc/systemd/system/foreman.service
+    mode: "0644"
+  notify: reload systemd
+
+- name: Pull Foreman Docker image
+  docker_image:
+    name: "{{ foreman_image }}"
+    source: pull
+    force_source: yes
+  register: pull_result
+  retries: 3
+  delay: 5
+  until: pull_result is success
+  notify: restart foreman
+
+- name: Enable and start Foreman
+  systemd:
+    name: foreman
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Wait for Foreman to be healthy
+  uri:
+    url: "http://localhost:{{ foreman_api_port }}/healthz"
+    method: GET
+    status_code: 200
+  register: healthcheck
+  retries: 15
+  delay: 4
+  until: healthcheck.status == 200
+
+- name: Display Foreman info
+  debug:
+    msg:
+      - "Foreman {{ foreman_version }} deployed successfully"
+      - "Config: {{ foreman_config_dir }}/foreman.yaml"
+      - "API: http://localhost:{{ foreman_api_port }}"
+      - "Health: http://localhost:{{ foreman_api_port }}/healthz"

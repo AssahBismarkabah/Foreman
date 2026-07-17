@@ -1,0 +1,24 @@
+---
+# Foreman role variables
+# Override these in vars/production.yml or via environment variables.
+
+foreman_version: "latest"
+foreman_image: "ghcr.io/foreman/foreman:{{ foreman_version }}"
+
+foreman_config_dir: "/opt/foreman/config"
+foreman_data_dir: "/opt/foreman/data"
+
+foreman_api_port: 8080
+
+# Database - use Neon free tier connection string
+# foreman_pg_dsn: "postgres://user:pass@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require"
+
+# Slack tokens (leave empty if not using Slack)
+# slack_bot_token: ""
+# slack_app_token: ""
+
+# Discord token (leave empty if not using Discord)
+# discord_bot_token: ""
+
+# Signing key (base64-encoded RSA private key)
+# foreman_signing_key: ""

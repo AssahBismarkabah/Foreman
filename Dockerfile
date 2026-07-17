@@ -18,11 +18,13 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     go mod download
 
-# Copy source and build a static binary
+# Copy source and build a static binary for the target architecture.
+# TARGETOS/TARGETARCH are auto-set by BuildKit during multi-platform builds.
 COPY . .
+ARG TARGETOS TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build \
     -ldflags="-w -s -X main.version=${VERSION}" \
     -trimpath \

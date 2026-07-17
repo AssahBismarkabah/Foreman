@@ -1,0 +1,41 @@
+[Unit]
+Description=Foreman Orchestrator
+Documentation=https://github.com/foreman/foreman
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/foreman
+
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
+EnvironmentFile={{ foreman_config_dir }}/env
+
+ExecStartPre=/usr/bin/docker pull {{ foreman_image }}
+ExecStart=/usr/bin/docker run \
+    --rm \
+    --name foreman \
+    --user root \
+    --network host \
+    -v {{ foreman_config_dir }}/foreman.yaml:/etc/foreman/foreman.yaml:ro \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -e FOREMAN_SIGNING_KEY \
+    -e DOCKER_HOST \
+    {{ foreman_image }} \
+    --config /etc/foreman/foreman.yaml
+
+ExecStop=/usr/bin/docker stop foreman
+ExecStopPost=/usr/bin/docker rm -f foreman 2>/dev/null || true
+
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths={{ foreman_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

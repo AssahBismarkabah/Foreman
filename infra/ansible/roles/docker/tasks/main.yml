@@ -1,0 +1,36 @@
+---
+# Docker installation role for Amazon Linux 2023 (ARM64)
+
+- name: Install Docker dependencies
+  dnf:
+    name:
+      - docker
+      - docker-compose-plugin
+      - jq
+      - git
+      - curl
+    state: present
+    update_cache: yes
+
+- name: Start and enable Docker
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Add ec2-user to docker group
+  user:
+    name: ec2-user
+    groups: docker
+    append: yes
+
+- name: Verify Docker is working
+  command: docker info
+  register: docker_info
+  changed_when: false
+  failed_when: docker_info.rc != 0
+
+- name: Display Docker version
+  debug:
+    msg: "Docker {{ docker_info.stdout_lines | select('match', '^Server Version:') | first | default('unknown') }}"

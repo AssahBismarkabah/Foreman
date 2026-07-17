@@ -1,0 +1,64 @@
+---
+# Foreman Deployment Playbook
+#
+# Configures an EC2 instance to run the Foreman orchestrator.
+# Assumes Terraform has already provisioned the infrastructure.
+#
+# Usage:
+#   export FOREMAN_HOST=$(terraform -chdir=../terraform output -raw instance_public_ip)
+#   ansible-playbook -i inventory.yml playbook.yml
+#
+# Or with dynamic inventory:
+#   ansible-playbook -i ../terraform-inventory.py playbook.yml
+
+- name: Configure Foreman instance
+  hosts: foreman
+  become: yes
+  gather_facts: yes
+
+  vars_files:
+    - "{{ lookup('env', 'FOREMAN_VARS_FILE') | default('vars/production.yml', true) }}"
+
+  pre_tasks:
+    - name: Wait for system to be reachable
+      wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Gather OS facts
+      setup:
+        filter:
+          - ansible_distribution*
+          - ansible_os_family
+          - ansible_architecture
+          - ansible_memtotal_mb
+
+    - name: Fail on unsupported OS
+      fail:
+        msg: "Unsupported OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      when: ansible_os_family != "Amazon" and ansible_distribution != "Amazon Linux"
+
+  roles:
+    - role: docker
+      tags: [docker]
+
+    - role: foreman
+      tags: [foreman]
+
+  post_tasks:
+    - name: Verify Foreman is running
+      uri:
+        url: http://localhost:8080/healthz
+        method: GET
+        status_code: 200
+      register: healthcheck
+      retries: 10
+      delay: 3
+      until: healthcheck.status == 200
+
+    - name: Display Foreman status
+      debug:
+        msg:
+          - "Foreman is running and healthy!"
+          - "API: http://{{ ansible_default_ipv4.address }}:8080"
+          - "Health: http://{{ ansible_default_ipv4.address }}:8080/healthz"

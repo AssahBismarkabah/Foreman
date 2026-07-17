@@ -1,0 +1,51 @@
+# =============================================================================
+# Foreman Terraform Configuration
+# =============================================================================
+# Copy this file to terraform.tfvars and fill in your values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   terraform init
+#   terraform plan
+#   terraform apply
+# =============================================================================
+
+aws_region = "us-east-1"
+environment = "dev"
+
+# --- Compute ---
+instance_type     = "t4g.small"
+use_spot_instance = true
+
+# Restrict API access in production. Slack Socket Mode is outbound-only.
+# api_cidr_blocks = ["1.2.3.4/32"]
+
+# --- Networking ---
+# Leave empty to use the default VPC
+# vpc_id    = "vpc-xxxxxxxx"
+# subnet_id = "subnet-xxxxxxxx"
+
+# Restrict SSH to your IP in production
+ssh_cidr_blocks = ["0.0.0.0/0"]
+api_cidr_blocks = ["0.0.0.0/0"]
+
+# --- SSH Key ---
+# Path to your public key (used locally, ignored in CI where it's derived from SSH_PRIVATE_KEY)
+# ssh_public_key_path = "/path/to/your/key.pub"
+
+# --- Database ---
+# Get a free Neon PostgreSQL connection string:
+#   1. Sign up at https://neon.tech
+#   2. Create a project
+#   3. Copy the connection string (postgres://user:pass@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require)
+foreman_pg_dsn = "postgres://user:password@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require"
+
+# --- Signing Key (optional) ---
+# Generate with: openssl genrsa 2048 | base64
+# foreman_signing_key = "LS0tLS1CRUdJTi..."
+
+# --- Slack (optional) ---
+# slack_bot_token = "xoxb-xxxxxxxxxxxx"
+# slack_app_token = "xapp-xxxxxxxxxxxx"
+
+# --- Discord (optional) ---
+# discord_bot_token = "xxxxxxxxxxxxxxxxxx"

@@ -1,0 +1,14 @@
+---
+# Foreman handlers
+# IMPORTANT: reload systemd MUST run before restart, or the service
+# starts with a stale unit definition.
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart foreman
+  systemd:
+    name: foreman
+    state: restarted
+    daemon_reload: yes

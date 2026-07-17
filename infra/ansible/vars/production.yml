@@ -1,0 +1,22 @@
+---
+# Production Foreman configuration
+# Copy to vault or use environment variables for secrets.
+
+foreman_version: "latest"
+foreman_image: "ghcr.io/foreman/foreman:{{ foreman_version }}"
+
+foreman_api_port: 8080
+
+# Database - Neon free tier PostgreSQL
+# Replace with your actual Neon connection string
+foreman_pg_dsn: "{{ lookup('env', 'FOREMAN_PG_DSN') }}"
+
+# Slack (optional - set via environment variables)
+slack_bot_token: "{{ lookup('env', 'SLACK_BOT_TOKEN') | default('', true) }}"
+slack_app_token: "{{ lookup('env', 'SLACK_APP_TOKEN') | default('', true) }}"
+
+# Discord (optional)
+discord_bot_token: "{{ lookup('env', 'DISCORD_BOT_TOKEN') | default('', true) }}"
+
+# Signing key (optional - for JWT signing)
+foreman_signing_key: "{{ lookup('env', 'FOREMAN_SIGNING_KEY') | default('', true) }}"

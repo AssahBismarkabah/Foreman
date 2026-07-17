@@ -1,0 +1,261 @@
+# =============================================================================
+# Infrastructure CI/CD Pipeline
+#
+# Automatically provisions and configures Foreman infrastructure on AWS.
+#
+# Triggers:
+#   - Push to infra/ directory on main branch
+#   - Manual trigger (workflow_dispatch)
+#
+# Pipeline stages:
+#   1. Validate: Terraform fmt + validate
+#   2. Plan:     Terraform plan (dry run)
+#   3. Apply:    Terraform apply (provision EC2 + networking)
+#   4. Config:   Ansible playbook (configure Docker + Foreman)
+#   5. Verify:   Health check against Foreman API
+# =============================================================================
+
+name: Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: dev
+      terraform_action:
+        description: "Terraform action"
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: plan
+
+env:
+  TF_VERSION: "1.9"
+  AWS_REGION: "us-east-1"
+  TF_VAR_foreman_pg_dsn: ${{ secrets.FOREMAN_PG_DSN }}
+  TF_VAR_foreman_signing_key: ${{ secrets.FOREMAN_SIGNING_KEY }}
+  TF_VAR_slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+  TF_VAR_slack_app_token: ${{ secrets.SLACK_APP_TOKEN }}
+  TF_VAR_discord_bot_token: ${{ secrets.DISCORD_BOT_TOKEN }}
+  # TF_VAR_ssh_public_key is set dynamically in plan/apply jobs from SSH_PRIVATE_KEY
+
+jobs:
+  validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform fmt
+        run: terraform fmt -check -diff
+        continue-on-error: true
+
+      - name: Terraform init
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+  plan:
+    name: Terraform Plan
+    needs: validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup SSH public key for Terraform
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+          echo "TF_VAR_ssh_public_key=$(cat ~/.ssh/id_ed25519.pub)" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform plan
+        run: |
+          # Secrets are passed via TF_VAR_* env vars (set in workflow env block).
+          # No -var-file needed in CI since terraform.tfvars is not committed.
+          terraform plan \
+            -out=tfplan \
+            -no-color
+        continue-on-error: false
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: infra/terraform/tfplan
+          retention-days: 7
+
+  apply:
+    name: Terraform Apply
+    needs: plan
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    outputs:
+      instance_ip: ${{ steps.save_outputs.outputs.instance_ip }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup SSH public key for Terraform
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+          echo "TF_VAR_ssh_public_key=$(cat ~/.ssh/id_ed25519.pub)" >> $GITHUB_ENV
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: infra/terraform
+
+      - name: Terraform apply
+        run: terraform apply tfplan -no-color
+
+      - name: Save outputs
+        id: save_outputs
+        run: |
+          IP=$(terraform output -raw instance_public_ip)
+          echo "instance_ip=$IP" >> $GITHUB_OUTPUT
+          echo "INSTANCE_IP=$IP" >> $GITHUB_ENV
+
+      - name: Wait for instance to be ready
+        run: |
+          aws ec2 wait instance-status-ok --instance-ids $(terraform output -raw instance_id)
+          echo "Instance is ready."
+
+  configure:
+    name: Ansible Configure
+    needs: apply
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/ansible
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: |
+          pip install ansible-core
+          ansible-galaxy collection install community.docker
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ needs.apply.outputs.instance_ip }} >> ~/.ssh/known_hosts
+
+      - name: Setup SSH key
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Run Ansible playbook
+        run: |
+          FOREMAN_HOST=${{ needs.apply.outputs.instance_ip }} \
+          FOREMAN_PG_DSN="${{ secrets.FOREMAN_PG_DSN }}" \
+          FOREMAN_SIGNING_KEY="${{ secrets.FOREMAN_SIGNING_KEY }}" \
+          SLACK_BOT_TOKEN="${{ secrets.SLACK_BOT_TOKEN }}" \
+          SLACK_APP_TOKEN="${{ secrets.SLACK_APP_TOKEN }}" \
+          DISCORD_BOT_TOKEN="${{ secrets.DISCORD_BOT_TOKEN }}" \
+          ansible-playbook \
+            -i inventory.yml \
+            -e "@vars/production.yml" \
+            playbook.yml
+
+  verify:
+    name: Verify Deployment
+    needs: [apply, configure]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Foreman health endpoint
+        run: |
+          IP="${{ needs.apply.outputs.instance_ip }}"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${IP}:8080/healthz" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Foreman is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i: status=$STATUS, retrying in 5s..."
+            sleep 5
+          done
+          echo "Foreman health check failed after 10 attempts"
+          exit 1
+
+      - name: Display deployment summary
+        run: |
+          IP="${{ needs.apply.outputs.instance_ip }}"
+          echo "=========================================="
+          echo "  Foreman Deployment Complete"
+          echo "=========================================="
+          echo "  Instance IP: $IP"
+          echo "  API:         http://${IP}:8080"
+          echo "  Health:      http://${IP}:8080/healthz"
+          echo "=========================================="
