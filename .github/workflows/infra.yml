@@ -242,10 +242,21 @@ jobs:
           pip install ansible-core
           ansible-galaxy collection install community.docker
 
-      - name: Add host to known_hosts
+      - name: Wait for SSH and add host to known_hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ needs.apply.outputs.instance_ip }} >> ~/.ssh/known_hosts
+          for i in $(seq 1 12); do
+            if ssh-keyscan -H ${{ needs.apply.outputs.instance_ip }} >> ~/.ssh/known_hosts 2>/dev/null; then
+              echo "SSH ready after $((i * 10))s"
+              break
+            fi
+            if [ "$i" -eq 12 ]; then
+              echo "SSH not ready after 120s, aborting"
+              exit 1
+            fi
+            echo "Attempt $i: SSH not ready yet, retrying in 10s..."
+            sleep 10
+          done
 
       - name: Setup SSH key
         run: |
