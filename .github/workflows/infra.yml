@@ -203,16 +203,23 @@ jobs:
 
       - name: Import existing resources into state
         run: |
-          # Only import resources that actually exist in AWS
+          # Get resources already in Terraform state (empty on first run)
+          ALREADY_IN_STATE=$(terraform state list 2>/dev/null || true)
+          # Import key pair if it exists in AWS but not in state
           if aws ec2 describe-key-pairs --key-names foreman-dev-key &>/dev/null; then
-            terraform import aws_key_pair.foreman foreman-dev-key || true
+            if ! echo "$ALREADY_IN_STATE" | grep -qx "aws_key_pair.foreman"; then
+              terraform import aws_key_pair.foreman foreman-dev-key || true
+            fi
           fi
+          # Import security group if it exists in AWS but not in state
           SG_ID=$(aws ec2 describe-security-groups \
             --filters "Name=group-name,Values=foreman-dev-sg" \
             --query 'SecurityGroups[0].GroupId' \
             --output text 2>/dev/null)
           if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
-            terraform import aws_security_group.foreman "$SG_ID" || true
+            if ! echo "$ALREADY_IN_STATE" | grep -qx "aws_security_group.foreman"; then
+              terraform import aws_security_group.foreman "$SG_ID" || true
+            fi
           fi
 
       - name: Terraform plan and apply
