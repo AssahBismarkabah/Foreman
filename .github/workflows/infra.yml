@@ -239,7 +239,7 @@ jobs:
 
       - name: Install Ansible
         run: |
-          pip install ansible-core
+          pip install ansible
           ansible-galaxy collection install community.docker
 
       - name: Wait for SSH and add host to known_hosts
