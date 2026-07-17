@@ -11,9 +11,8 @@
     - "{{ foreman_data_dir }}"
 
 - name: Create environment file with signing key
-  copy:
-    content: |
-      {% if foreman_signing_key | length > 0 %}FOREMAN_SIGNING_KEY={{ foreman_signing_key }}{% endif %}
+  template:
+    src: env.j2
     dest: "{{ foreman_config_dir }}/env"
     mode: "0600"
   notify: restart foreman
