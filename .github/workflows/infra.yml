@@ -165,6 +165,9 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          # Disable wrapper to avoid "Error: Terraform exited with code 1." noise
+          # from the wrapper mixing stdout/stderr (hashicorp/setup-terraform#405)
+          terraform_wrapper: false
 
       - name: Setup SSH public key for Terraform
         run: |
@@ -200,13 +203,16 @@ jobs:
 
       - name: Import existing resources into state
         run: |
-          terraform import aws_key_pair.foreman foreman-dev-key 2>/dev/null || echo "Key pair not found or already in state"
+          # Only import resources that actually exist in AWS
+          if aws ec2 describe-key-pairs --key-names foreman-dev-key &>/dev/null; then
+            terraform import aws_key_pair.foreman foreman-dev-key || true
+          fi
           SG_ID=$(aws ec2 describe-security-groups \
             --filters "Name=group-name,Values=foreman-dev-sg" \
             --query 'SecurityGroups[0].GroupId' \
             --output text 2>/dev/null)
           if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
-            terraform import aws_security_group.foreman "$SG_ID" 2>/dev/null || echo "Security group not found or already in state"
+            terraform import aws_security_group.foreman "$SG_ID" || true
           fi
 
       - name: Terraform plan and apply
