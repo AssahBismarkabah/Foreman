@@ -31,9 +31,9 @@ variable "use_spot_instance" {
 }
 
 variable "root_volume_size" {
-  description = "Root EBS volume size in GB"
+  description = "Root EBS volume size in GB. Must be >= the AMI snapshot size (Amazon Linux 2023 requires 30GB)."
   type        = number
-  default     = 20
+  default     = 30
 }
 
 variable "root_volume_type" {

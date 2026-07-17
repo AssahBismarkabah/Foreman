@@ -21,7 +21,7 @@ Slack/Discord ──WebSocket──▶ Foreman ──Docker socket──▶ Sand
 | Component | Option | Cost |
 |---|---|---|
 | EC2 t4g.small spot | 2 vCPU, 2 GB RAM | ~$4.38/mo |
-| EBS gp3 | 20 GB | ~$1.60/mo |
+| EBS gp3 | 30 GB | ~$2.40/mo |
 | Neon PostgreSQL | Free tier (100 CU-hours, 3 GB) | $0/mo |
 | **Total** | | **~$5.98/mo** |
 
