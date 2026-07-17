@@ -35,8 +35,8 @@
 
     - name: Fail on unsupported OS
       fail:
-        msg: "Unsupported OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
-      when: ansible_os_family != "Amazon" and ansible_distribution != "Amazon Linux"
+        msg: "Unsupported OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+      when: ansible_facts['distribution'] not in ["Amazon", "Amazon Linux"]
 
   roles:
     - role: docker
