@@ -118,3 +118,10 @@ variable "discord_bot_token" {
   sensitive   = true
   default     = ""
 }
+
+variable "ghcr_token" {
+  description = "GitHub Container Registry token for pulling Foreman images. Use a classic PAT with read:packages scope, or GITHUB_TOKEN from CI."
+  type        = string
+  sensitive   = true
+  default     = ""
+}

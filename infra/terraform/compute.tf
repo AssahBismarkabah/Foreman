@@ -64,6 +64,8 @@ resource "aws_instance" "foreman" {
     slack_bot_token     = var.slack_bot_token
     slack_app_token     = var.slack_app_token
     discord_bot_token   = var.discord_bot_token
+    ghcr_token          = var.ghcr_token
+    ghcr_username       = "github-actions"
   }))
 
   metadata_options {
@@ -111,6 +113,8 @@ resource "aws_spot_instance_request" "foreman" {
     slack_bot_token     = var.slack_bot_token
     slack_app_token     = var.slack_app_token
     discord_bot_token   = var.discord_bot_token
+    ghcr_token          = var.ghcr_token
+    ghcr_username       = "github-actions"
   }))
 
   metadata_options {

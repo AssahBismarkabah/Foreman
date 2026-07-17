@@ -31,6 +31,13 @@
     mode: "0644"
   notify: reload systemd
 
+- name: Log in to GHCR (if token provided)
+  docker_login:
+    registry_url: "{{ foreman_image.split('/')[0] }}"
+    username: "{{ ghcr_username | default('', true) }}"
+    password: "{{ ghcr_token | default('', true) }}"
+  when: ghcr_token | default('') | length > 0
+
 - name: Pull Foreman Docker image
   docker_image:
     name: "{{ foreman_image }}"

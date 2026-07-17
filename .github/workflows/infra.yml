@@ -54,6 +54,7 @@ env:
   TF_VAR_slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
   TF_VAR_slack_app_token: ${{ secrets.SLACK_APP_TOKEN }}
   TF_VAR_discord_bot_token: ${{ secrets.DISCORD_BOT_TOKEN }}
+  TF_VAR_ghcr_token: ${{ secrets.GITHUB_TOKEN }}
   # TF_VAR_ssh_public_key is set dynamically in plan/apply jobs from SSH_PRIVATE_KEY
 
 jobs:
@@ -287,6 +288,8 @@ jobs:
           ansible-playbook \
             -i inventory.yml \
             -e "@vars/production.yml" \
+            -e "ghcr_username=${{ github.actor }}" \
+            -e "ghcr_token=${{ secrets.GITHUB_TOKEN }}" \
             playbook.yml
 
   verify:

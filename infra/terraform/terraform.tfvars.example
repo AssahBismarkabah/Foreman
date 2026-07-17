@@ -49,3 +49,8 @@ foreman_pg_dsn = "postgres://user:password@ep-xxx.us-east-1.aws.neon.tech/neondb
 
 # --- Discord (optional) ---
 # discord_bot_token = "xxxxxxxxxxxxxxxxxx"
+
+# --- GHCR Token (optional) ---
+# For private GHCR packages on first boot. Create a classic PAT with read:packages scope.
+# In CI, GITHUB_TOKEN is used automatically.
+# ghcr_token = "ghp_xxxxxxxxxxxx"

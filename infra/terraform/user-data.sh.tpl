@@ -22,6 +22,13 @@ systemctl enable docker
 mkdir -p /opt/foreman/{bin,config,data}
 cd /opt/foreman
 
+# --- GHCR Authentication ---
+# If a GHCR token is provided, log in to pull private images.
+%{ if ghcr_token != "" ~}
+echo "Logging in to GHCR..."
+echo "${ghcr_token}" | docker login ghcr.io -u "${ghcr_username}" --password-stdin
+%{ endif ~}
+
 # --- Pull Foreman Binary ---
 # Strategy: try GHCR image first, fall back to building from source.
 # For production, use the pre-built Docker image from the release workflow.
@@ -30,7 +37,7 @@ FOREMAN_VERSION="${foreman_version}"
 
 if [ "$FOREMAN_VERSION" = "latest" ]; then
     # Pull the latest release from GHCR
-    docker pull ghcr.io/foreman/foreman:latest 2>/dev/null || {
+    docker pull ghcr.io/assahbismarkabah/foreman:latest 2>/dev/null || {
         echo "GHCR pull failed, building from source..."
         git clone https://github.com/foreman/foreman.git /tmp/foreman-src
         cd /tmp/foreman-src
@@ -121,7 +128,7 @@ WorkingDirectory=/opt/foreman
 
 EnvironmentFile=/opt/foreman/config/env
 
-ExecStartPre=/usr/bin/docker pull ghcr.io/foreman/foreman:latest
+ExecStartPre=/usr/bin/docker pull ghcr.io/assahbismarkabah/foreman:latest
 ExecStart=/usr/bin/docker run \
     --rm \
     --name foreman \
@@ -131,7 +138,7 @@ ExecStart=/usr/bin/docker run \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e FOREMAN_SIGNING_KEY \
     -e DOCKER_HOST \
-    ghcr.io/foreman/foreman:latest \
+    ghcr.io/assahbismarkabah/foreman:latest \
     --config /etc/foreman/foreman.yaml
 
 ExecStop=/usr/bin/docker stop foreman

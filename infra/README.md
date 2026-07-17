@@ -144,6 +144,7 @@ Add these in your repo: **Settings > Secrets and variables > Actions > New repos
 | `SLACK_APP_TOKEN` | No | Slack app-level token |
 | `DISCORD_BOT_TOKEN` | No | Discord bot token |
 | `FOREMAN_SIGNING_KEY` | No | Base64-encoded RSA key |
+| `GHCR_PAT` | No | GitHub PAT with `read:packages` scope (for private GHCR packages on first boot) |
 
 ## Cost Optimization Notes
 

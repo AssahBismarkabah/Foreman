@@ -3,7 +3,7 @@
 # Override these in vars/production.yml or via environment variables.
 
 foreman_version: "latest"
-foreman_image: "ghcr.io/foreman/foreman:{{ foreman_version }}"
+foreman_image: "ghcr.io/assahbismarkabah/foreman:{{ foreman_version }}"
 
 foreman_config_dir: "/opt/foreman/config"
 foreman_data_dir: "/opt/foreman/data"
