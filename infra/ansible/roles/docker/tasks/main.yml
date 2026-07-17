@@ -5,10 +5,8 @@
   dnf:
     name:
       - docker
-      - docker-compose-plugin
       - jq
       - git
-      - curl
     state: present
     update_cache: yes
 
