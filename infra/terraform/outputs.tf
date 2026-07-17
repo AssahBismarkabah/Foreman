@@ -1,6 +1,6 @@
 output "instance_id" {
   description = "EC2 instance ID"
-  value       = local.instance.id
+  value       = local.instance_id
 }
 
 output "instance_public_ip" {

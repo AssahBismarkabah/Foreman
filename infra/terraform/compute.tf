@@ -29,6 +29,10 @@ locals {
 locals {
   # Select the instance resource based on pricing model
   instance = var.use_spot_instance ? aws_spot_instance_request.foreman[0] : aws_instance.foreman[0]
+
+  # Spot request resources have .id = spot request ID (sir-xxx), not the EC2
+  # instance ID (i-xxx). Use .spot_instance_id for spot, .id for on-demand.
+  instance_id = var.use_spot_instance ? aws_spot_instance_request.foreman[0].spot_instance_id : aws_instance.foreman[0].id
 }
 
 # --- On-Demand Instance ---

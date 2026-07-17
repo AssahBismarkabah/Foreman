@@ -27,7 +27,7 @@ data "aws_subnet" "default" {
 
 resource "aws_eip" "foreman" {
   domain   = "vpc"
-  instance = local.instance.id
+  instance = local.instance_id
 
   tags = {
     Name = "${var.project_name}-${var.environment}-eip"
