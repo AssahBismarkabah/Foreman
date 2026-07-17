@@ -12,15 +12,13 @@ terraform {
     }
   }
 
-  # State stored locally by default.
-  # For teams, migrate to S3 + DynamoDB:
-  #   backend "s3" {
-  #     bucket         = "foreman-terraform-state"
-  #     key            = "infra/terraform.tfstate"
-  #     region         = "us-east-1"
-  #     dynamodb_table = "foreman-terraform-locks"
-  #     encrypt        = true
-  #   }
+  backend "s3" {
+    bucket         = "foreman-terraform-state-571075516563"
+    key            = "infra/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "foreman-terraform-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {
