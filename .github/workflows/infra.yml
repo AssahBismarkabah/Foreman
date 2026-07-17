@@ -237,8 +237,28 @@ jobs:
 
       - name: Wait for instance to be ready
         run: |
-          aws ec2 wait instance-status-ok --instance-ids $(terraform output -raw instance_id)
-          echo "Instance is ready."
+          INSTANCE_ID=$(terraform output -raw instance_id)
+          echo "Waiting for instance $INSTANCE_ID..."
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
+          echo "Instance status checks passed."
+
+      - name: Verify public IP is reachable
+        run: |
+          IP=$(terraform output -raw instance_public_ip)
+          echo "Instance public IP: $IP"
+          echo "INSTANCE_IP=$IP" >> $GITHUB_ENV
+          # Verify the IP is actually pingable (or at least has a route)
+          for i in $(seq 1 6); do
+            if ping -c 1 -W 5 "$IP" &>/dev/null; then
+              echo "Instance is reachable on the network."
+              break
+            fi
+            if [ "$i" -eq 6 ]; then
+              echo "Warning: Instance not responding to ping (may still be booting)"
+            fi
+            echo "Waiting for network reachability... attempt $i"
+            sleep 10
+          done
 
   configure:
     name: Ansible Configure
@@ -258,14 +278,24 @@ jobs:
 
       - name: Wait for SSH and add host to known_hosts
         run: |
+          IP="${{ needs.apply.outputs.instance_ip }}"
+          echo "Waiting for SSH on $IP:22..."
           mkdir -p ~/.ssh
-          for i in $(seq 1 12); do
-            if ssh-keyscan -H ${{ needs.apply.outputs.instance_ip }} >> ~/.ssh/known_hosts 2>/dev/null; then
-              echo "SSH ready after $((i * 10))s"
-              break
+          for i in $(seq 1 30); do
+            # Check if port 22 is open first
+            if nc -zv -w5 "$IP" 22 2>&1; then
+              # Port is open, try ssh-keyscan
+              if ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts 2>&1; then
+                echo "SSH ready after $((i * 10))s"
+                break
+              fi
             fi
-            if [ "$i" -eq 12 ]; then
-              echo "SSH not ready after 120s, aborting"
+            if [ "$i" -eq 30 ]; then
+              echo "SSH not ready after 300s, aborting"
+              echo "Debug: checking instance reachability..."
+              curl -s -m 5 "http://$IP:8080/healthz" || echo "Health endpoint not reachable"
+              echo "Debug: traceroute to $IP..."
+              traceroute -m 5 "$IP" 2>&1 || true
               exit 1
             fi
             echo "Attempt $i: SSH not ready yet, retrying in 10s..."
