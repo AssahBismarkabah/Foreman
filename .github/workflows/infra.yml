@@ -106,7 +106,7 @@ jobs:
           echo "TF_VAR_ssh_public_key=$(cat ~/.ssh/id_ed25519.pub)" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -125,7 +125,7 @@ jobs:
         continue-on-error: false
 
       - name: Upload plan artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tfplan
           path: infra/terraform/tfplan
@@ -159,7 +159,7 @@ jobs:
           echo "TF_VAR_ssh_public_key=$(cat ~/.ssh/id_ed25519.pub)" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -169,7 +169,7 @@ jobs:
         run: terraform init
 
       - name: Download plan artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tfplan
           path: infra/terraform
