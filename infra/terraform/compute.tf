@@ -48,6 +48,12 @@ resource "aws_instance" "foreman" {
   key_name               = aws_key_pair.foreman.key_name
   iam_instance_profile   = aws_iam_instance_profile.foreman.name
 
+  # Ensure security group ingress rules exist before instance launches
+  depends_on = [
+    aws_vpc_security_group_ingress_rule.ssh,
+    aws_vpc_security_group_ingress_rule.api,
+  ]
+
   root_block_device {
     volume_type = var.root_volume_type
     volume_size = var.root_volume_size
@@ -92,6 +98,12 @@ resource "aws_spot_instance_request" "foreman" {
   vpc_security_group_ids = [aws_security_group.foreman.id]
   key_name               = aws_key_pair.foreman.key_name
   iam_instance_profile   = aws_iam_instance_profile.foreman.name
+
+  # Ensure security group ingress rules exist before instance launches
+  depends_on = [
+    aws_vpc_security_group_ingress_rule.ssh,
+    aws_vpc_security_group_ingress_rule.api,
+  ]
 
   spot_type                      = "persistent"
   instance_interruption_behavior = "stop"

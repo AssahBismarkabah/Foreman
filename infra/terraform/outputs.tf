@@ -4,8 +4,8 @@ output "instance_id" {
 }
 
 output "instance_public_ip" {
-  description = "Public IP address of the Foreman instance"
-  value       = local.instance.public_ip
+  description = "Public IP address of the Foreman instance (Elastic IP)"
+  value       = aws_eip.foreman.public_ip
 }
 
 output "instance_private_ip" {
@@ -15,12 +15,12 @@ output "instance_private_ip" {
 
 output "instance_public_dns" {
   description = "Public DNS name of the Foreman instance"
-  value       = local.instance.public_dns
+  value       = aws_eip.foreman.public_dns
 }
 
 output "ssh_command" {
-  description = "SSH command to connect to the instance (adjust key path if needed)"
-  value       = "ssh -i ~/.ssh/id_ed25519 ec2-user@${local.instance.public_ip}"
+  description = "SSH command to connect to the instance"
+  value       = "ssh -i ~/.ssh/id_ed25519 ec2-user@${aws_eip.foreman.public_ip}"
 }
 
 output "instance_type" {
