@@ -132,6 +132,14 @@ jobs:
       - name: Terraform init
         run: terraform init
 
+      - name: Clear stale state lock
+        run: |
+          aws dynamodb delete-item \
+            --table-name foreman-terraform-locks \
+            --key '{"LockID": {"S": "foreman-terraform-state-571075516563/infra/terraform.tfstate"}}' \
+            2>/dev/null || true
+          echo "Stale lock cleared (if any)."
+
       - name: Terraform plan
         run: |
           # Secrets are passed via TF_VAR_* env vars (set in workflow env block).
@@ -201,6 +209,14 @@ jobs:
 
       - name: Terraform init
         run: terraform init
+
+      - name: Clear stale state lock
+        run: |
+          aws dynamodb delete-item \
+            --table-name foreman-terraform-locks \
+            --key '{"LockID": {"S": "foreman-terraform-state-571075516563/infra/terraform.tfstate"}}' \
+            2>/dev/null || true
+          echo "Stale lock cleared (if any)."
 
       - name: Import existing resources into state
         run: |
@@ -400,6 +416,14 @@ jobs:
 
       - name: Terraform init
         run: terraform init
+
+      - name: Clear stale state lock
+        run: |
+          aws dynamodb delete-item \
+            --table-name foreman-terraform-locks \
+            --key '{"LockID": {"S": "foreman-terraform-state-571075516563/infra/terraform.tfstate"}}' \
+            2>/dev/null || true
+          echo "Stale lock cleared (if any)."
 
       - name: Terraform destroy
         run: |
