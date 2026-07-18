@@ -63,9 +63,9 @@ variable "ssh_cidr_blocks" {
 }
 
 variable "api_cidr_blocks" {
-  description = "CIDR blocks allowed to access Foreman API (:8080). Slack/Discord use outbound WebSocket, so the API doesn't need to be public. Default is localhost only."
+  description = "CIDR blocks allowed to access Foreman API (:8080). Slack/Discord use outbound WebSocket, so the API doesn't need to be public. Default is open for dev; restrict in production."
   type        = list(string)
-  default     = ["127.0.0.1/32"]
+  default     = ["0.0.0.0/0"]
 }
 
 # --- SSH ---
