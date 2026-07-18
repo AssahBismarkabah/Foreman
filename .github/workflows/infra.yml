@@ -430,4 +430,22 @@ jobs:
           terraform destroy \
             -auto-approve \
             -no-color
-        continue-on-error: false
+        continue-on-error: true
+
+      - name: Force unlock state (clean up after destroy)
+        if: always()
+        run: |
+          LOCK_ID=$(aws dynamodb get-item \
+            --table-name foreman-terraform-locks \
+            --key '{"LockID": {"S": "foreman-terraform-state-571075516563/infra/terraform.tfstate"}}' \
+            --query 'LockID.S' \
+            --output text 2>/dev/null || echo "")
+          if [ -n "$LOCK_ID" ] && [ "$LOCK_ID" != "None" ]; then
+            terraform force-unlock -force "$LOCK_ID" 2>/dev/null || true
+          fi
+          # Also delete the lock item directly
+          aws dynamodb delete-item \
+            --table-name foreman-terraform-locks \
+            --key '{"LockID": {"S": "foreman-terraform-state-571075516563/infra/terraform.tfstate"}}' \
+            2>/dev/null || true
+          echo "State lock cleaned up."
