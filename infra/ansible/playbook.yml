@@ -55,8 +55,44 @@
       retries: 10
       delay: 3
       until: healthcheck.status == 200
+      ignore_errors: yes
+
+    - name: Diagnose health check failure
+      when: healthcheck is failed
+      block:
+        - name: Check systemd status
+          command: systemctl status foreman --no-pager -l
+          register: systemd_status
+          ignore_errors: yes
+
+        - name: Show systemd status
+          debug:
+            var: systemd_status.stdout_lines
+
+        - name: Check Docker container logs
+          command: docker logs foreman 2>&1
+          register: docker_logs
+          ignore_errors: yes
+
+        - name: Show Docker logs
+          debug:
+            var: docker_logs.stdout_lines
+
+        - name: Check if container is running
+          command: docker ps -a --filter name=foreman --format '{{ "{{" }}.Names{{ "}}" }} {{ "{{" }}.Status{{ "}}" }}'
+          register: docker_ps
+          ignore_errors: yes
+
+        - name: Show container status
+          debug:
+            var: docker_ps.stdout_lines
+
+        - name: Fail with diagnostic info
+          fail:
+            msg: "Foreman health check failed. See diagnostics above."
 
     - name: Display Foreman status
+      when: healthcheck is success
       debug:
         msg:
           - "Foreman is running and healthy!"

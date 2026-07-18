@@ -57,7 +57,9 @@
     name: foreman
     state: started
     enabled: yes
-    daemon_reload: yes
+    # NOTE: no daemon_reload here -- the restart handler above already ran it.
+    # A second daemon-reload can cause systemd to restart the service on some
+    # versions, making it briefly unavailable for the post_task health check.
 
 - name: Wait for Foreman to be healthy
   uri:
