@@ -25,8 +25,7 @@ data "aws_subnet" "default" {
 # --- Elastic IP ---
 # Static IP for the Foreman instance. Free while attached to a running instance.
 # NOTE: We use a separate aws_eip_association resource instead of the `instance`
-# parameter on aws_eip, because the `instance` parameter does not work reliably
-# with spot instances (spot_instance_id can return sir-xxx instead of i-xxx).
+# parameter on aws_eip, for cleaner lifecycle separation.
 
 resource "aws_eip" "foreman" {
   domain = "vpc"

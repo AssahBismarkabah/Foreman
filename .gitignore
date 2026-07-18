@@ -2,3 +2,6 @@
 .idea/
 .env
 # Keep .env.example (committed template)
+.terraform/
+*.tfstate
+*.tfstate.backup
