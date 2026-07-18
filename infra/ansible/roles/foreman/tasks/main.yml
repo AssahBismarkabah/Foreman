@@ -49,6 +49,9 @@
   until: pull_result is success
   notify: restart foreman
 
+- name: Flush handlers to apply config changes before starting
+  meta: flush_handlers
+
 - name: Enable and start Foreman
   systemd:
     name: foreman
