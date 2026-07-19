@@ -13,7 +13,7 @@ WorkingDirectory=/opt/foreman
 Environment=DOCKER_HOST=unix:///var/run/docker.sock
 EnvironmentFile={{ foreman_config_dir }}/env
 
-ExecStartPre=/usr/bin/docker pull {{ foreman_image }}
+# Image is pulled by Ansible during deployment. No ExecStartPre needed.
 ExecStart=/usr/bin/docker run \
     --rm \
     --name foreman \
