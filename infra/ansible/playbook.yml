@@ -36,7 +36,7 @@
     - name: Fail on unsupported OS
       fail:
         msg: "Unsupported OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
-      when: ansible_facts['distribution'] not in ["Amazon", "Amazon Linux"]
+      when: ansible_facts['distribution'] not in ["Amazon", "Amazon Linux", "Ubuntu"]
 
     - name: Validate required variables
       assert:
