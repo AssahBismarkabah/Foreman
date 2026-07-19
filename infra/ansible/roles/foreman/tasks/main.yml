@@ -70,6 +70,116 @@
   retries: 15
   delay: 4
   until: healthcheck.status == 200
+  ignore_errors: yes
+
+- name: Diagnose health check failure
+  when: healthcheck is failed
+  block:
+    - name: Check systemd status
+      command: systemctl status foreman --no-pager -l
+      register: systemd_status
+      ignore_errors: yes
+
+    - name: Show systemd unit status
+      debug:
+        var: systemd_status.stdout_lines
+
+    - name: Check systemd journal for Foreman logs
+      command: journalctl -u foreman --no-pager -n 50
+      register: journal_logs
+      ignore_errors: yes
+
+    - name: Show journal logs
+      debug:
+        var: journal_logs.stdout_lines
+
+    - name: Check Docker container logs (may show nothing if --rm removed it)
+      command: docker logs foreman 2>&1 || echo "Container already removed or never started"
+      register: docker_logs
+      ignore_errors: yes
+
+    - name: Show Docker logs
+      debug:
+        var: docker_logs.stdout_lines
+
+    - name: List all Docker containers (including exited)
+      command: docker ps -a --filter name=foreman --format 'table {{"{{"}}.Names{{"}}"}}\t{{"{{"}}.Status{{"}}"}}\t{{"{{"}}.ExitCode{{"}}"}}\t{{"{{"}}.CreatedAt{{"}}"}}'
+      register: docker_ps
+      ignore_errors: yes
+
+    - name: Show container status
+      debug:
+        var: docker_ps.stdout_lines
+
+    - name: Check if container exited and show exit code
+      command: docker inspect foreman --format 'ExitCode: {{"{{"}}.State.ExitCode{{"}}"}}, Status: {{"{{"}}.State.Status{{"}}"}}, Error: {{"{{"}}.State.Error{{"}}"}}' 2>&1
+      register: docker_inspect
+      ignore_errors: yes
+
+    - name: Show container exit details
+      when: docker_inspect is success
+      debug:
+        var: docker_inspect.stdout_lines
+
+    - name: Verify the rendered foreman.yaml on disk
+      command: cat /opt/foreman/config/foreman.yaml
+      register: rendered_config
+      ignore_errors: yes
+
+    - name: Show rendered config (with DSN masked)
+      debug:
+        msg: "{{ rendered_config.stdout_lines | default([]) | map('regex_replace', '(dsn: ).+', '\\1***MASKED***') | list }}"
+
+    - name: Check env file
+      command: cat /opt/foreman/config/env
+      register: env_file
+      ignore_errors: yes
+
+    - name: Show env file
+      debug:
+        var: env_file.stdout_lines
+
+    - name: Systemd service file contents
+      command: cat /etc/systemd/system/foreman.service
+      register: service_file
+      ignore_errors: yes
+
+    - name: Show service file
+      debug:
+        var: service_file.stdout_lines
+
+    - name: Check Docker host connectivity
+      command: docker info
+      register: docker_info
+      ignore_errors: yes
+
+    - name: Show Docker info status
+      debug:
+        msg: "Docker daemon reachable: {{ docker_info is success }}"
+
+    - name: Check if foreman image exists
+      command: docker images ghcr.io/assahbismarkabah/foreman --format '{{"{{"}}.Repository{{"}}"}}:{{"{{"}}.Tag{{"}}"}} ({{"{{"}}.Size{{"}}"}})'
+      register: foreman_image_check
+      ignore_errors: yes
+
+    - name: Show foreman image status
+      debug:
+        var: foreman_image_check.stdout_lines
+
+    - name: Fail with all diagnostic info collected
+      fail:
+        msg: "Foreman health check failed after 15 attempts. See diagnostics above for details. Key areas to check: (1) Is the rendered DSN correct? (2) What does the journal log say? (3) Did the container exit immediately?"
+  always:
+    - name: Ensure we fail the task
+      fail:
+        msg: "Health check failed"
+      when: healthcheck is failed
+
+- name: Verify health check passed
+  assert:
+    that:
+      - healthcheck is success
+    fail_msg: "Health check did not pass (diagnostics above)"
 
 - name: Display Foreman info
   debug:

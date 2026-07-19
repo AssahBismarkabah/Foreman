@@ -324,18 +324,25 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
 
       - name: Run Ansible playbook
+        env:
+          FOREMAN_PG_DSN: ${{ secrets.FOREMAN_PG_DSN }}
+          FOREMAN_SIGNING_KEY: ${{ secrets.FOREMAN_SIGNING_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_APP_TOKEN: ${{ secrets.SLACK_APP_TOKEN }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          FOREMAN_HOST=${{ needs.apply.outputs.instance_ip }} \
-          FOREMAN_PG_DSN="${{ secrets.FOREMAN_PG_DSN }}" \
-          FOREMAN_SIGNING_KEY="${{ secrets.FOREMAN_SIGNING_KEY }}" \
-          SLACK_BOT_TOKEN="${{ secrets.SLACK_BOT_TOKEN }}" \
-          SLACK_APP_TOKEN="${{ secrets.SLACK_APP_TOKEN }}" \
-          DISCORD_BOT_TOKEN="${{ secrets.DISCORD_BOT_TOKEN }}" \
           ansible-playbook \
             -i inventory.yml \
             -e "@vars/production.yml" \
-            -e "ghcr_username=${{ github.actor }}" \
-            -e "ghcr_token=${{ secrets.GITHUB_TOKEN }}" \
+            -e "foreman_pg_dsn=$FOREMAN_PG_DSN" \
+            -e "foreman_signing_key=$FOREMAN_SIGNING_KEY" \
+            -e "slack_bot_token=$SLACK_BOT_TOKEN" \
+            -e "slack_app_token=$SLACK_APP_TOKEN" \
+            -e "discord_bot_token=$DISCORD_BOT_TOKEN" \
+            -e "ghcr_username=$GHCR_USERNAME" \
+            -e "ghcr_token=$GHCR_TOKEN" \
             playbook.yml
 
   verify:

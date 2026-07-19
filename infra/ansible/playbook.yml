@@ -38,6 +38,14 @@
         msg: "Unsupported OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
       when: ansible_facts['distribution'] not in ["Amazon", "Amazon Linux"]
 
+    - name: Validate required variables
+      assert:
+        that:
+          - foreman_pg_dsn | length > 0
+          - foreman_pg_dsn is match("^postgres://")
+        fail_msg: "foreman_pg_dsn must be a non-empty PostgreSQL connection string starting with 'postgres://'. Current value: '{{ foreman_pg_dsn | default('EMPTY', true) }}' (length: {{ foreman_pg_dsn | default('') | length }})"
+      tags: [validate]
+
   roles:
     - role: docker
       tags: [docker]
