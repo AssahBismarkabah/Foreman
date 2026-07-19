@@ -103,14 +103,9 @@
         var: docker_logs.stdout_lines
 
     - name: Show Docker container states
-      command:
-        - docker
-        - ps
-        - -a
-        - --filter
-        - name=foreman
-        - --format
-        - !unsafe "table {{.Names}}\t{{.Status}}\t{{.ExitCode}}\t{{.CreatedAt}}"
+      vars:
+        fmt: !unsafe 'table {{.Names}}\t{{.Status}}\t{{.ExitCode}}\t{{.CreatedAt}}'
+      shell: "docker ps -a --filter name=foreman --format '{{ fmt }}'"
       register: docker_ps
       ignore_errors: yes
 
@@ -119,12 +114,9 @@
         var: docker_ps.stdout_lines
 
     - name: Check container exit details
-      command:
-        - docker
-        - inspect
-        - foreman
-        - --format
-        - !unsafe "ExitCode={{.State.ExitCode}} Status={{.State.Status}} Error={{.State.Error}}"
+      vars:
+        fmt: !unsafe 'ExitCode={{.State.ExitCode}} Status={{.State.Status}} Error={{.State.Error}}'
+      shell: "docker inspect foreman --format '{{ fmt }}'"
       register: docker_inspect
       ignore_errors: yes
 
@@ -170,12 +162,9 @@
         msg: "Docker daemon reachable: {{ docker_info is success }}"
 
     - name: Check if foreman image exists
-      command:
-        - docker
-        - images
-        - ghcr.io/assahbismarkabah/foreman
-        - --format
-        - !unsafe "{{.Repository}}:{{.Tag}} ({{.Size}})"
+      vars:
+        fmt: !unsafe '{{.Repository}}:{{.Tag}} ({{.Size}})'
+      shell: "docker images ghcr.io/assahbismarkabah/foreman --format '{{ fmt }}'"
       register: foreman_image_check
       ignore_errors: yes
 

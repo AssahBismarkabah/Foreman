@@ -87,14 +87,9 @@
             var: docker_logs.stdout_lines
 
         - name: Show container states
-          command:
-            - docker
-            - ps
-            - -a
-            - --filter
-            - name=foreman
-            - --format
-            - !unsafe "{{.Names}}: {{.Status}} (exit={{.ExitCode}})"
+          vars:
+            fmt: !unsafe '{{.Names}}: {{.Status}} (exit={{.ExitCode}})'
+          shell: "docker ps -a --filter name=foreman --format '{{ fmt }}'"
           register: docker_ps
           ignore_errors: yes
 
@@ -103,12 +98,9 @@
             var: docker_ps.stdout_lines
 
         - name: Check container exit details
-          command:
-            - docker
-            - inspect
-            - foreman
-            - --format
-            - !unsafe "ExitCode={{.State.ExitCode}} Error={{.State.Error}}"
+          vars:
+            fmt: !unsafe 'ExitCode={{.State.ExitCode}} Error={{.State.Error}}'
+          shell: "docker inspect foreman --format '{{ fmt }}'"
           register: docker_inspect
           ignore_errors: yes
 
