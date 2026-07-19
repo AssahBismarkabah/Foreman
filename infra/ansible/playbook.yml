@@ -86,14 +86,24 @@
           debug:
             var: docker_logs.stdout_lines
 
-        - name: Check if container is running
-          command: docker ps -a --filter name=foreman --format '{{ "{{" }}.Names{{ "}}" }} {{ "{{" }}.Status{{ "}}" }}'
+        - name: Show container states
+          shell: docker ps -a --filter name=foreman --format '{% raw %}{{.Names}}{% endraw %}: {% raw %}{{.Status}}{% endraw %} (exit={% raw %}{{.ExitCode}}{% endraw %})'
           register: docker_ps
           ignore_errors: yes
 
         - name: Show container status
           debug:
             var: docker_ps.stdout_lines
+
+        - name: Check container exit details
+          shell: docker inspect foreman --format='ExitCode={% raw %}{{.State.ExitCode}}{% endraw %} Error={% raw %}{{.State.Error}}{% endraw %}' 2>&1 || true
+          register: docker_inspect
+          ignore_errors: yes
+
+        - name: Show container exit details
+          when: docker_inspect is success
+          debug:
+            var: docker_inspect.stdout_lines
 
         - name: Fail with diagnostic info
           fail:

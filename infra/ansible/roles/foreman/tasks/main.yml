@@ -93,8 +93,8 @@
       debug:
         var: journal_logs.stdout_lines
 
-    - name: Check Docker container logs (may show nothing if --rm removed it)
-      command: docker logs foreman 2>&1 || echo "Container already removed or never started"
+    - name: Check Docker container logs
+      shell: docker logs foreman 2>&1 || true
       register: docker_logs
       ignore_errors: yes
 
@@ -102,8 +102,8 @@
       debug:
         var: docker_logs.stdout_lines
 
-    - name: List all Docker containers (including exited)
-      command: docker ps -a --filter name=foreman --format 'table {{"{{"}}.Names{{"}}"}}\t{{"{{"}}.Status{{"}}"}}\t{{"{{"}}.ExitCode{{"}}"}}\t{{"{{"}}.CreatedAt{{"}}"}}'
+    - name: Show Docker container states
+      shell: docker ps -a --filter name=foreman --format 'table {% raw %}{{.Names}}{% endraw %}\t{% raw %}{{.Status}}{% endraw %}\t{% raw %}{{.ExitCode}}{% endraw %}\t{% raw %}{{.CreatedAt}}{% endraw %}'
       register: docker_ps
       ignore_errors: yes
 
@@ -111,8 +111,8 @@
       debug:
         var: docker_ps.stdout_lines
 
-    - name: Check if container exited and show exit code
-      command: docker inspect foreman --format 'ExitCode: {{"{{"}}.State.ExitCode{{"}}"}}, Status: {{"{{"}}.State.Status{{"}}"}}, Error: {{"{{"}}.State.Error{{"}}"}}' 2>&1
+    - name: Check container exit details
+      shell: docker inspect foreman --format='ExitCode={% raw %}{{.State.ExitCode}}{% endraw %} Status={% raw %}{{.State.Status}}{% endraw %} Error={% raw %}{{.State.Error}}{% endraw %}' 2>&1 || true
       register: docker_inspect
       ignore_errors: yes
 
@@ -121,14 +121,14 @@
       debug:
         var: docker_inspect.stdout_lines
 
-    - name: Verify the rendered foreman.yaml on disk
-      command: cat /opt/foreman/config/foreman.yaml
+    - name: Show rendered foreman.yaml (DSN masked)
+      shell: sed 's/dsn: .*/dsn: ***MASKED***/' /opt/foreman/config/foreman.yaml
       register: rendered_config
       ignore_errors: yes
 
-    - name: Show rendered config (with DSN masked)
+    - name: Show rendered config
       debug:
-        msg: "{{ rendered_config.stdout_lines | default([]) | map('regex_replace', '(dsn: ).+', '\\1***MASKED***') | list }}"
+        var: rendered_config.stdout_lines
 
     - name: Check env file
       command: cat /opt/foreman/config/env
@@ -139,7 +139,7 @@
       debug:
         var: env_file.stdout_lines
 
-    - name: Systemd service file contents
+    - name: Show systemd service file
       command: cat /etc/systemd/system/foreman.service
       register: service_file
       ignore_errors: yes
@@ -158,7 +158,7 @@
         msg: "Docker daemon reachable: {{ docker_info is success }}"
 
     - name: Check if foreman image exists
-      command: docker images ghcr.io/assahbismarkabah/foreman --format '{{"{{"}}.Repository{{"}}"}}:{{"{{"}}.Tag{{"}}"}} ({{"{{"}}.Size{{"}}"}})'
+      shell: docker images ghcr.io/assahbismarkabah/foreman --format '{% raw %}{{.Repository}}{% endraw %}:{% raw %}{{.Tag}}{% endraw %} ({% raw %}{{.Size}}{% endraw %})'
       register: foreman_image_check
       ignore_errors: yes
 
@@ -168,7 +168,7 @@
 
     - name: Fail with all diagnostic info collected
       fail:
-        msg: "Foreman health check failed after 15 attempts. See diagnostics above for details. Key areas to check: (1) Is the rendered DSN correct? (2) What does the journal log say? (3) Did the container exit immediately?"
+        msg: "Foreman health check failed after 15 attempts. See diagnostics above for details."
   always:
     - name: Ensure we fail the task
       fail:
