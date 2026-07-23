@@ -83,6 +83,7 @@ func (p *Plugin) Start(ctx context.Context, bus eventbus.EventBus) error {
 }
 
 // registerSlashCommands creates the /foreman slash command in all guilds.
+// It waits up to 30s for guild state to be populated after connecting.
 func (p *Plugin) registerSlashCommands(ctx context.Context, sess *discordgo.Session) {
 	cmd := &discordgo.ApplicationCommand{
 		Name:        "foreman",
@@ -95,6 +96,21 @@ func (p *Plugin) registerSlashCommands(ctx context.Context, sess *discordgo.Sess
 				Required:    true,
 			},
 		},
+	}
+
+	// Wait for guild state to be populated (GUILD_CREATE events arrive after Ready).
+	for deadline := time.Now().Add(30 * time.Second); len(sess.State.Guilds) == 0 && time.Now().Before(deadline); {
+		select {
+		case <-ctx.Done():
+			log.Printf("discord: context cancelled while waiting for guilds")
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
+	if len(sess.State.Guilds) == 0 {
+		log.Printf("discord: no guilds found after 30s, skipping command registration")
+		return
 	}
 
 	for _, guild := range sess.State.Guilds {
