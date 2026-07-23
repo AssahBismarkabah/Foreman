@@ -220,23 +220,85 @@ jobs:
 
       - name: Import existing resources into state
         run: |
-          # Get resources already in Terraform state (empty on first run)
-          ALREADY_IN_STATE=$(terraform state list 2>/dev/null || true)
-          # Import key pair if it exists in AWS but not in state
-          if aws ec2 describe-key-pairs --key-names foreman-dev-key &>/dev/null; then
-            if ! echo "$ALREADY_IN_STATE" | grep -qx "aws_key_pair.foreman"; then
-              terraform import aws_key_pair.foreman foreman-dev-key || true
+          set -euo pipefail
+          # Check state per-resource (don't cache - imports above may change it)
+          import_if_not_in_state() {
+            if ! terraform state list 2>/dev/null | grep -Fxq "$1"; then
+              echo "Importing $1 as $2"
+              terraform import "$1" "$2" || echo "  -> not found, will be created"
+            else
+              echo "Already in state: $1"
             fi
+          }
+
+          PROJECT="foreman"
+          ENV="dev"
+
+          # Key pair
+          if aws ec2 describe-key-pairs --key-names "${PROJECT}-${ENV}-key" &>/dev/null; then
+            import_if_not_in_state "aws_key_pair.foreman" "${PROJECT}-${ENV}-key"
           fi
-          # Import security group if it exists in AWS but not in state
+
+          # IAM role and attachments
+          ROLE_NAME="${PROJECT}-${ENV}-ec2-role"
+          if aws iam get-role --role-name "$ROLE_NAME" &>/dev/null; then
+            import_if_not_in_state "aws_iam_role.foreman" "$ROLE_NAME"
+            import_if_not_in_state "aws_iam_role_policy_attachment.ssm_core" \
+              "$ROLE_NAME/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+            import_if_not_in_state "aws_iam_role_policy_attachment.cloudwatch_agent" \
+              "$ROLE_NAME/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+          fi
+
+          # IAM instance profile
+          PROFILE_NAME="${PROJECT}-${ENV}-instance-profile"
+          if aws iam get-instance-profile --instance-profile-name "$PROFILE_NAME" &>/dev/null; then
+            import_if_not_in_state "aws_iam_instance_profile.foreman" "$PROFILE_NAME"
+          fi
+
+          # Security group and rules
           SG_ID=$(aws ec2 describe-security-groups \
-            --filters "Name=group-name,Values=foreman-dev-sg" \
+            --filters "Name=group-name,Values=${PROJECT}-${ENV}-sg" \
             --query 'SecurityGroups[0].GroupId' \
             --output text 2>/dev/null)
           if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
-            if ! echo "$ALREADY_IN_STATE" | grep -qx "aws_security_group.foreman"; then
-              terraform import aws_security_group.foreman "$SG_ID" || true
+            import_if_not_in_state "aws_security_group.foreman" "$SG_ID"
+
+            # Import security group rules by matching port/protocol/cidr
+            # Ingress: SSH port 22 from 0.0.0.0/0
+            RULE_ID=$(aws ec2 describe-security-group-rules \
+              --filters "Name=group-id,Values=$SG_ID" \
+              --query 'SecurityGroupRules[?IsEgress==`false` && IpProtocol==`tcp` && FromPort==`22` && ToPort==`22` && CidrIpv4==`0.0.0.0/0`].SecurityGroupRuleId' \
+              --output text 2>/dev/null || true)
+            if [ -n "$RULE_ID" ] && [ "$RULE_ID" != "None" ]; then
+              import_if_not_in_state 'aws_vpc_security_group_ingress_rule.ssh["0.0.0.0/0"]' "$SG_ID/$RULE_ID"
             fi
+
+            # Ingress: API port 8080 from 0.0.0.0/0
+            RULE_ID=$(aws ec2 describe-security-group-rules \
+              --filters "Name=group-id,Values=$SG_ID" \
+              --query 'SecurityGroupRules[?IsEgress==`false` && IpProtocol==`tcp` && FromPort==`8080` && ToPort==`8080` && CidrIpv4==`0.0.0.0/0`].SecurityGroupRuleId' \
+              --output text 2>/dev/null || true)
+            if [ -n "$RULE_ID" ] && [ "$RULE_ID" != "None" ]; then
+              import_if_not_in_state 'aws_vpc_security_group_ingress_rule.api["0.0.0.0/0"]' "$SG_ID/$RULE_ID"
+            fi
+
+            # Egress: all traffic to 0.0.0.0/0
+            RULE_ID=$(aws ec2 describe-security-group-rules \
+              --filters "Name=group-id,Values=$SG_ID" \
+              --query 'SecurityGroupRules[?IsEgress==`true` && IpProtocol==`-1` && CidrIpv4==`0.0.0.0/0`].SecurityGroupRuleId' \
+              --output text 2>/dev/null || true)
+            if [ -n "$RULE_ID" ] && [ "$RULE_ID" != "None" ]; then
+              import_if_not_in_state 'aws_vpc_security_group_egress_rule.all' "$SG_ID/$RULE_ID"
+            fi
+          fi
+
+          # Elastic IP
+          EIP_ALLOC=$(aws ec2 describe-addresses \
+            --filters "Name=tag:Name,Values=${PROJECT}-${ENV}-eip" \
+            --query 'Addresses[0].AllocationId' \
+            --output text 2>/dev/null || true)
+          if [ "$EIP_ALLOC" != "None" ] && [ -n "$EIP_ALLOC" ]; then
+            import_if_not_in_state "aws_eip.foreman" "$EIP_ALLOC"
           fi
 
       - name: Terraform plan and apply

@@ -53,6 +53,14 @@ resource "aws_instance" "foreman" {
     aws_vpc_security_group_ingress_rule.api,
   ]
 
+  # Spot instances can take longer to provision if capacity is tight.
+  # Default create timeout is 10m; we increase it for spot resilience.
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "15m"
+  }
+
   dynamic "instance_market_options" {
     for_each = var.use_spot_instance ? [1] : []
     content {
