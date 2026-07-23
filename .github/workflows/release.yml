@@ -106,7 +106,13 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             docker pull ghcr.io/${{ env.IMAGE_LOWER }}:latest
-            sudo systemctl restart foreman
+            sudo systemctl restart foreman 2>&1 || {
+              echo "=== Foreman restart failed, collecting diagnostics ==="
+              sudo journalctl -u foreman --no-pager -n 80
+              echo "=== Docker container status ==="
+              docker ps -a --filter name=foreman
+              exit 1
+            }
 
       - name: Wait for startup
         run: sleep 15
