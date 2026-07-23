@@ -94,7 +94,6 @@ jobs:
     name: Deploy to EC2
     needs: docker
     runs-on: ubuntu-latest
-    if: ${{ secrets.EC2_HOST != '' }}
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
