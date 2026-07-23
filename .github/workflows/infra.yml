@@ -352,68 +352,21 @@ jobs:
 
     steps:
       - name: Check Foreman health endpoint
-        id: healthcheck
         run: |
           IP="${{ needs.apply.outputs.instance_ip }}"
-          echo "IP=$IP" >> $GITHUB_OUTPUT
           for i in $(seq 1 10); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${IP}:8080/healthz" || echo "000")
             if [ "$STATUS" = "200" ]; then
               echo "Foreman is healthy!"
-              echo "healthy=true" >> $GITHUB_OUTPUT
               exit 0
             fi
             echo "Attempt $i: status=$STATUS, retrying in 5s..."
             sleep 5
           done
-          echo "healthy=false" >> $GITHUB_OUTPUT
           echo "Foreman health check failed after 10 attempts"
           exit 1
 
-      - name: SSH diagnostics on failure
-        if: failure()
-        run: |
-          IP="${{ steps.healthcheck.outputs.IP }}"
-
-          # Setup SSH key
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-          # Accept host key
-          ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts 2>/dev/null || true
-
-          SSH="ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ec2-user@$IP"
-
-          echo "=== 1. Container status ==="
-          $SSH "docker ps -a --filter name=foreman"
-
-          echo ""
-          echo "=== 2. Foreman service status ==="
-          $SSH "systemctl status foreman --no-pager -l 2>&1 || true"
-
-          echo ""
-          echo "=== 3. Journal logs (last 100) ==="
-          $SSH "journalctl -u foreman --no-pager -n 100 2>&1 || true"
-
-          echo ""
-          echo "=== 4. Docker logs ==="
-          $SSH "docker logs foreman 2>&1 || echo 'No logs available (container may not exist)'"
-
-          echo ""
-          echo "=== 5. Listening on port 8080 ==="
-          $SSH "ss -tlnp | grep 8080 || echo 'Nothing listening on port 8080'"
-
-          echo ""
-          echo "=== 6. firewalld status ==="
-          $SSH "systemctl is-active firewalld 2>/dev/null || echo 'firewalld not active'"
-
-          echo ""
-          echo "=== 7. Docker info ==="
-          $SSH "docker info --format '{{.ServerVersion}}' 2>&1 || echo 'Docker not available'"
-
       - name: Display deployment summary
-        if: success()
         run: |
           IP="${{ needs.apply.outputs.instance_ip }}"
           echo "=========================================="
