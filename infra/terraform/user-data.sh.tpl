@@ -11,6 +11,13 @@ echo "=== Foreman Bootstrap Starting ==="
 dnf update -y
 dnf install -y docker jq curl git
 
+# --- Disable firewalld ---
+# The Foreman container uses --network host, so the host firewall directly
+# controls access to container ports. firewalld blocks all non-SSH ports by
+# default on Amazon Linux 2023, which would prevent external health checks
+# from reaching port 8080 even though the security group allows it.
+systemctl disable --now firewalld 2>/dev/null || true
+
 # --- Docker Setup ---
 systemctl enable --now docker
 usermod -aG docker ec2-user
