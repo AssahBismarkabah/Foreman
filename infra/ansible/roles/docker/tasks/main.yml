@@ -9,21 +9,20 @@
     state: present
     update_cache: yes
 
-- name: Add Docker GPG key
-  get_url:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    dest: /usr/share/keyrings/docker-archive-keyring.gpg
-    mode: "0644"
+- name: Get system architecture
+  command: dpkg --print-architecture
+  register: dpkg_arch
+  changed_when: false
 
 - name: Add Docker repository
   deb822_repository:
     name: docker
     types: [deb]
     uris: https://download.docker.com/linux/ubuntu
-    suites: noble
+    suites: "{{ ansible_distribution_release }}"
     components: [stable]
-    architectures: arm64
-    signed_by: /usr/share/keyrings/docker-archive-keyring.gpg
+    architectures: "{{ dpkg_arch.stdout }}"
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
     state: present
 
 - name: Install Docker packages
