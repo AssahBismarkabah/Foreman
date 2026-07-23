@@ -366,7 +366,47 @@ jobs:
           echo "Foreman health check failed after 10 attempts"
           exit 1
 
+      - name: SSH diagnostics on failure
+        if: failure()
+        run: |
+          IP="${{ needs.apply.outputs.instance_ip }}"
+
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          SSH="ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ec2-user@$IP"
+
+          echo "=== 1. Container status ==="
+          $SSH "docker ps -a --filter name=foreman"
+
+          echo ""
+          echo "=== 2. Foreman service status ==="
+          $SSH "systemctl status foreman --no-pager -l 2>&1 || true"
+
+          echo ""
+          echo "=== 3. Journal logs (last 100) ==="
+          $SSH "journalctl -u foreman --no-pager -n 100 2>&1 || true"
+
+          echo ""
+          echo "=== 4. Docker logs ==="
+          $SSH "docker logs foreman 2>&1 || echo 'No logs available'"
+
+          echo ""
+          echo "=== 5. Listening on port 8080 ==="
+          $SSH "ss -tlnp | grep 8080 || echo 'Nothing listening on port 8080'"
+
+          echo ""
+          echo "=== 6. firewalld status ==="
+          $SSH "systemctl is-active firewalld 2>/dev/null || echo 'firewalld not active'"
+
+          echo ""
+          echo "=== 7. OS info ==="
+          $SSH "cat /etc/os-release | head -5"
+
       - name: Display deployment summary
+        if: success()
         run: |
           IP="${{ needs.apply.outputs.instance_ip }}"
           echo "=========================================="

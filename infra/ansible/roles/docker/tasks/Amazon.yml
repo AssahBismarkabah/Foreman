@@ -1,0 +1,15 @@
+---
+# Docker setup for Amazon Linux 2023
+# Docker is pre-installed on the AL2023 AMI.
+
+- name: Ensure Docker is installed
+  dnf:
+    name: docker
+    state: present
+
+- name: Install supporting tools
+  dnf:
+    name:
+      - jq
+      - git
+    state: present

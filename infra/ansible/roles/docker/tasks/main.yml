@@ -1,53 +1,20 @@
 ---
-# Docker installation role for Ubuntu 24.04 (ARM64)
+# Docker installation role
+# Supports Ubuntu 24.04 (full installation via apt)
+# and Amazon Linux 2023 (Docker pre-installed, just ensure running)
 
-- name: Install Docker dependencies
-  apt:
-    name:
-      - ca-certificates
-      - curl
-    state: present
-    update_cache: yes
-
-- name: Get system architecture
-  command: dpkg --print-architecture
-  register: dpkg_arch
-  changed_when: false
-
-- name: Add Docker repository
-  deb822_repository:
-    name: docker
-    types: [deb]
-    uris: https://download.docker.com/linux/ubuntu
-    suites: "{{ ansible_distribution_release }}"
-    components: [stable]
-    architectures: "{{ dpkg_arch.stdout }}"
-    signed_by: https://download.docker.com/linux/ubuntu/gpg
-    state: present
-
-- name: Install Docker packages
-  apt:
-    name:
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
-      - docker-buildx-plugin
-      - docker-compose-plugin
-      - jq
-      - git
-    state: present
-    update_cache: yes
+- name: Include OS-specific tasks
+  include_tasks: "{{ 'Amazon' if ansible_facts['distribution'] in ['Amazon', 'Amazon Linux'] else ansible_facts['distribution'] }}.yml"
 
 - name: Start and enable Docker
   systemd:
     name: docker
     state: started
     enabled: yes
-    daemon_reload: yes
 
-- name: Add ubuntu user to docker group
+- name: Add default user to docker group
   user:
-    name: ubuntu
+    name: "{{ 'ec2-user' if ansible_facts['distribution'] in ['Amazon', 'Amazon Linux'] else 'ubuntu' }}"
     groups: docker
     append: yes
 

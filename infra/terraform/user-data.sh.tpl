@@ -9,7 +9,7 @@ echo "=== Foreman Bootstrap Starting ==="
 
 # --- System Updates ---
 dnf update -y
-dnf install -y docker jq curl git
+dnf install -y docker jq git
 
 # --- Disable firewalld ---
 # The Foreman container uses --network host, so the host firewall directly
