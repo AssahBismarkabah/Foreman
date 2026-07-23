@@ -17,12 +17,6 @@
 
 name: Infrastructure
 
-# Prevent concurrent runs from conflicting on state locks.
-# Only one workflow can run at a time for the same ref + environment.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.inputs.environment || 'dev' }}-${{ github.ref }}
-  cancel-in-progress: false
-
 on:
   push:
     branches: [main]
@@ -140,9 +134,6 @@ jobs:
 
       - name: Clear stale state lock
         run: |
-          # Remove any stale DynamoDB lock from a previous cancelled run.
-          # Plan is read-only, but Terraform's S3 backend still tries to acquire
-          # a lock for state refresh. We clear any leftover lock to be safe.
           aws dynamodb delete-item \
             --table-name foreman-terraform-locks \
             --key '{"LockID": {"S": "foreman-terraform-state-571075516563/infra/terraform.tfstate"}}' \
@@ -151,11 +142,9 @@ jobs:
 
       - name: Terraform plan
         run: |
-          # Plan is read-only: -lock=false is safe and avoids dynalock conflicts
-          # from previous cancelled applies. The apply step (which writes state)
-          # will use -lock-timeout to acquire the lock safely.
+          # Secrets are passed via TF_VAR_* env vars (set in workflow env block).
+          # No -var-file needed in CI since terraform.tfvars is not committed.
           terraform plan \
-            -lock=false \
             -out=tfplan \
             -no-color
         continue-on-error: false
@@ -314,10 +303,8 @@ jobs:
 
       - name: Terraform plan and apply
         run: |
-          # Plan is read-only: -lock=false avoids stale lock issues.
-          # Apply uses -lock-timeout to wait gracefully for the lock.
-          terraform plan -lock=false -out=tfplan -no-color
-          terraform apply -lock-timeout=60s tfplan -no-color
+          terraform plan -out=tfplan -no-color
+          terraform apply tfplan -no-color
 
       - name: Save outputs
         id: save_outputs
