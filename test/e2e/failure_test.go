@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,7 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	flag.Parse()
 	if testing.Short() {
 		fmt.Println("Short test detected, skipping Docker image builds")
 		os.Exit(0)
