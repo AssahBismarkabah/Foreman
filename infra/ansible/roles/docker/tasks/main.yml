@@ -1,85 +1,55 @@
 ---
-# Docker installation role - supports Amazon Linux 2023 and Ubuntu 24.04
+# Docker installation role for Ubuntu 24.04 (ARM64)
 
-- name: Install Docker on Amazon Linux
-  when: ansible_facts['distribution'] in ["Amazon", "Amazon Linux"]
-  block:
-    - name: Install Docker dependencies (Amazon Linux)
-      dnf:
-        name:
-          - docker
-        state: present
-
-    - name: Start and enable Docker (Amazon Linux)
-      systemd:
-        name: docker
-        state: started
-        enabled: yes
-        daemon_reload: yes
-
-    - name: Add ec2-user to docker group (Amazon Linux)
-      user:
-        name: ec2-user
-        groups: docker
-        append: yes
-
-- name: Install Docker on Ubuntu
-  when: ansible_facts['distribution'] == "Ubuntu"
-  block:
-    - name: Install Docker dependencies (Ubuntu)
-      apt:
-        name:
-          - ca-certificates
-          - curl
-        state: present
-        update_cache: yes
-
-    - name: Get system architecture (Ubuntu)
-      command: dpkg --print-architecture
-      register: dpkg_arch
-      changed_when: false
-
-    - name: Add Docker repository (Ubuntu DEB822 format)
-      deb822_repository:
-        name: docker
-        types: deb
-        uris: https://download.docker.com/linux/ubuntu
-        suites: "{{ ansible_distribution_release }}"
-        components: stable
-        architectures: "{{ dpkg_arch.stdout }}"
-        signed_by: https://download.docker.com/linux/ubuntu/gpg
-        state: present
-
-    - name: Install Docker packages (Ubuntu)
-      apt:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-buildx-plugin
-          - docker-compose-plugin
-        state: present
-        update_cache: yes
-
-    - name: Start and enable Docker (Ubuntu)
-      systemd:
-        name: docker
-        state: started
-        enabled: yes
-        daemon_reload: yes
-
-    - name: Add ubuntu user to docker group (Ubuntu)
-      user:
-        name: ubuntu
-        groups: docker
-        append: yes
-
-- name: Install common packages
-  package:
+- name: Install Docker dependencies
+  apt:
     name:
+      - ca-certificates
+      - curl
+    state: present
+    update_cache: yes
+
+- name: Get system architecture
+  command: dpkg --print-architecture
+  register: dpkg_arch
+  changed_when: false
+
+- name: Add Docker repository (DEB822 format)
+  deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_distribution_release }}"
+    components: stable
+    architectures: "{{ dpkg_arch.stdout }}"
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Install Docker packages
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
       - jq
       - git
     state: present
+    update_cache: yes
+
+- name: Start and enable Docker
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Add ubuntu user to docker group
+  user:
+    name: ubuntu
+    groups: docker
+    append: yes
 
 - name: Verify Docker is working
   command: docker info
