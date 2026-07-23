@@ -33,6 +33,11 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	if testing.Short() {
+		fmt.Println("Short test detected, skipping Docker image builds")
+		os.Exit(0)
+	}
+
 	// Generate a signing key globally (required by all tests).
 	// This runs once instead of per-test (each call to ensureSigningKey).
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
