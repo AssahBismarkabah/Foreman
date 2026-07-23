@@ -95,6 +95,9 @@ jobs:
     needs: docker
     runs-on: ubuntu-latest
     steps:
+      - name: Compute lowercase image name
+        run: echo "IMAGE_LOWER=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
@@ -102,8 +105,8 @@ jobs:
           username: ec2-user
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            docker pull ghcr.io/${{ github.repository }}:latest
-            systemctl restart foreman
+            docker pull ghcr.io/${{ env.IMAGE_LOWER }}:latest
+            sudo systemctl restart foreman
 
       - name: Wait for startup
         run: sleep 15
