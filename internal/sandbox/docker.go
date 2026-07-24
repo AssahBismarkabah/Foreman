@@ -571,6 +571,51 @@ func (d *DockerSandbox) ResolveHost(ctx context.Context, hostname string) (strin
 			}
 		}
 	}
+	if err != nil {
+		log.Printf("DEBUG ContainerInspect(%q): %v", hostname, err)
+		// ContainerInspect by exact name failed. Try listing all containers
+		// and matching by name prefix or label (compose service name).
+		containers, listErr := d.apiClient.ContainerList(ctx, container.ListOptions{})
+		if listErr == nil {
+			for _, c := range containers {
+				for _, name := range c.Names {
+					if strings.TrimPrefix(name, "/") == hostname {
+						// Found by container name -- inspect with the ID.
+						inspect, err = d.apiClient.ContainerInspect(ctx, c.ID)
+						if err == nil && inspect.ContainerJSONBase != nil {
+							for _, netCfg := range inspect.NetworkSettings.Networks {
+								if netCfg.IPAddress != "" {
+									return netCfg.IPAddress, nil
+								}
+							}
+						}
+						break
+					}
+				}
+				// Also check compose labels for service name.
+				if svc, ok := c.Labels["com.docker.compose.service"]; ok && svc == hostname {
+					inspect, err = d.apiClient.ContainerInspect(ctx, c.ID)
+					if err == nil && inspect.ContainerJSONBase != nil {
+						for _, netCfg := range inspect.NetworkSettings.Networks {
+							if netCfg.IPAddress != "" {
+								return netCfg.IPAddress, nil
+							}
+						}
+					}
+				}
+			}
+		}
+		// Log container names for debugging.
+		if listErr == nil {
+			names := make([]string, 0, len(containers))
+			for _, c := range containers {
+				names = append(names, c.Names...)
+			}
+			log.Printf("DEBUG available containers: %v", names)
+		} else {
+			log.Printf("DEBUG ContainerList: %v", listErr)
+		}
+	}
 
 	// Fall back to Go's standard DNS resolver (works for public hostnames).
 	ips, err := net.LookupHost(hostname)
