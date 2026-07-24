@@ -75,7 +75,7 @@ func newTestCoordinator(t *testing.T) (*Coordinator, context.Context) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 	return co, context.Background()
 }
 
@@ -120,7 +120,7 @@ func TestSubmitTaskAdapterFailure(t *testing.T) {
 	// Use an adapter that fails during BuildConfig.
 	failBuild := &failBuildAdapter{name: "fail-build"}
 	adapters := []adapter.AgentAdapter{failBuild}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	ctx := context.Background()
 	if err := co.SubmitTask(ctx, "task_fail", "will fail"); err != nil {
@@ -189,7 +189,7 @@ func TestSubmitTaskMaxConcurrent(t *testing.T) {
 
 	block := make(chan struct{})
 	blkAdapter := &blockingAdapter{block: block}
-	co := New(bus, cp, sbox, hub, []adapter.AgentAdapter{blkAdapter}, nil, 1, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, []adapter.AgentAdapter{blkAdapter}, nil, 1, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	ctx := context.Background()
 
@@ -220,7 +220,7 @@ func TestCoordinatorAdapterScoping(t *testing.T) {
 		&mockAdapter{name: "opencode"},
 		&mockAdapter{name: "claude"},
 	}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	if len(co.adapters) != 2 {
 		t.Errorf("expected 2 adapters, got %d", len(co.adapters))
@@ -245,7 +245,7 @@ func TestFullPipeline_EventsPublishedOnBus(t *testing.T) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	var agentEvents []schemas.Event
 	cancel, err := bus.Subscribe(context.Background(),
@@ -289,7 +289,7 @@ func TestFullPipeline_NonZeroExitCode(t *testing.T) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &failSandbox{exitCode: 42, stderr: "agent crashed"}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	if err := co.SubmitTask(context.Background(), "task_fail_exit", "do something"); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
@@ -308,7 +308,7 @@ func TestFullPipeline_SandboxProvisionFailure(t *testing.T) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &provisionFailSandbox{}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	if err := co.SubmitTask(context.Background(), "task_provision_fail", "do something"); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
@@ -327,7 +327,7 @@ func TestFullPipeline_VerifyFailure(t *testing.T) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &mockSandbox{}
 	adapters := []adapter.AgentAdapter{&verifyFailAdapter{name: "test"}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	if err := co.SubmitTask(context.Background(), "task_verify_fail", "do something"); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
@@ -346,7 +346,7 @@ func TestFullPipeline_MultiLineOutput(t *testing.T) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &multiLineSandbox{stdout: "line one\nline two\nline three\n"}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	var agentEvents []schemas.Event
 	cancel, err := bus.Subscribe(context.Background(),
@@ -557,6 +557,7 @@ func TestCoordinatorCrashDetectionAndRetry(t *testing.T) {
 		10*time.Millisecond,  // backoffBase (small for fast test)
 		1.5,                  // backoffMultiplier
 		5*time.Millisecond,   // jitter
+		0,                    // defaultTimeout (none)
 		0, 0,                 // no resource alerts
 	)
 
@@ -585,7 +586,7 @@ func TestCoordinatorGracefulShutdown(t *testing.T) {
 	hub := mcphub.NewStaticHub(nil)
 	sbox := &blockingSandbox{}
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

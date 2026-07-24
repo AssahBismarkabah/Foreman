@@ -69,7 +69,7 @@ func TestIntegration_CoordinatorWithRealDocker(t *testing.T) {
 		t.Fatalf("NewDockerSandbox: %v", err)
 	}
 	adapters := []adapter.AgentAdapter{&echoAdapter{}}
-	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0)
+	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	// Subscribe to agent.output events to verify they are published
 	var agentEvents []schemas.Event

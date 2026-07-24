@@ -96,6 +96,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		cfg.Subsystems.Coordinator.BackoffBase,
 		cfg.Subsystems.Coordinator.BackoffMultiplier,
 		cfg.Subsystems.Coordinator.Jitter,
+		cfg.Subsystems.Coordinator.DefaultTimeout,
 		parseFloat64(cfg.Subsystems.Sandbox.CPUAlertPercent, 0),
 		parseFloat64(cfg.Subsystems.Sandbox.MemoryAlertPercent, 0),
 	)

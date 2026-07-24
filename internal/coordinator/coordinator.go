@@ -7,6 +7,8 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -50,6 +52,7 @@ type Coordinator struct {
 	backoffBase         time.Duration        // base delay for exponential backoff
 	backoffMultiplier   float64              // multiplier per retry attempt
 	jitter              time.Duration        // random jitter added to backoff delay
+	defaultTimeout      time.Duration        // max execution time for agent commands (0 = no timeout)
 	accepting           bool
 	cpuAlertPercent     float64              // 0 = disabled
 	memoryAlertPercent  float64              // 0 = disabled
@@ -76,6 +79,7 @@ func New(
 	backoffBase time.Duration,
 	backoffMultiplier float64,
 	jitter time.Duration,
+	defaultTimeout time.Duration,
 	cpuAlertPercent float64,
 	memoryAlertPercent float64,
 ) *Coordinator {
@@ -125,6 +129,7 @@ func New(
 		backoffBase:        backoffBase,
 		backoffMultiplier:  backoffMultiplier,
 		jitter:             jitter,
+		defaultTimeout:     defaultTimeout,
 		accepting:          true,
 		cpuAlertPercent:    cpuAlertPercent,
 		memoryAlertPercent: memoryAlertPercent,
@@ -324,6 +329,37 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		}
 	}
 
+	// Resolve LLM endpoint hostnames from this process's DNS (Foreman runs on
+	// the compose network and can resolve compose service names) and replace
+	// them with IP addresses in the env vars, so the sandbox container doesn't
+	// need Docker DNS to resolve compose service names. This is needed because
+	// the sandbox is a standalone container created via the Docker API, not a
+	// compose-managed service, and Docker DNS for compose network aliases does
+	// not reliably work for standalone containers on all CI platforms.
+	for _, key := range []string{"OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"} {
+		val, ok := env[key]
+		if !ok {
+			continue
+		}
+		u, err := url.Parse(val)
+		if err != nil {
+			continue
+		}
+		host := u.Hostname()
+		ips, err := net.LookupHost(host)
+		if err != nil || len(ips) == 0 {
+			continue
+		}
+		port := u.Port()
+		if port != "" {
+			u.Host = net.JoinHostPort(ips[0], port)
+		} else {
+			u.Host = ips[0]
+		}
+		env[key] = u.String()
+		log.Printf("DEBUG resolved %s hostname %s -> %s", key, host, ips[0])
+	}
+
 	if c.tokenIssuer != nil {
 		scope := &identity.AgentScope{
 			Actions: []string{"read", "pull"},
@@ -406,7 +442,11 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 	// DEBUG: log the exact command being executed
 	log.Printf("DEBUG executing in sandbox %s: %v", sandboxID, args)
 
-	result, execErr := c.sbox.Execute(heartbeatCtx, sandboxID, args, 0)
+	execTimeout := c.defaultTimeout
+	if execTimeout <= 0 {
+		execTimeout = 30 * time.Minute // safe fallback if no timeout configured
+	}
+	result, execErr := c.sbox.Execute(heartbeatCtx, sandboxID, args, execTimeout)
 
 	// Check if execution was interrupted by heartbeat failure.
 	select {
