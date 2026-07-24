@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -555,74 +556,134 @@ func (d *DockerSandbox) Destroy(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// ResolveHost resolves a hostname to an IP address. It first tries Docker's
-// embedded DNS by inspecting the container directly (for Docker compose service
-// names or container names on the same network). If that fails, it falls back
-// to Go's standard DNS resolver for internet hostnames.
+// ResolveHost resolves a hostname to an IP address. This is used when
+// standard DNS resolution fails inside the coordinator. The resolution order:
+//
+//  1. ContainerInspect by hostname (works for compose service names or
+//     container names on the same network).
+//  2. ContainerList with name/ compose-label matching, then re-inspect
+//     by container ID (handles cases where name-based inspect returns
+//     incomplete network info).
+//  3. Gateway IP fallback: read the default gateway from /proc/net/route
+//     and use the host's published port. This works when Docker's embedded
+//     DNS (127.0.0.11) is broken, which is a known issue on some CI runners
+//     (see docker/compose#11563, moby/moby#41003).
+//  4. Go's standard DNS resolver for internet hostnames (last resort).
 func (d *DockerSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
-	// Try Docker DNS first: inspect the container by name.
+	// --- 1. Direct container name inspection ---
 	inspect, err := d.apiClient.ContainerInspect(ctx, hostname)
-	if err == nil && inspect.ContainerJSONBase != nil {
-		// Found a Docker container with this name. Return its IP on the
-		// first attached network.
+	if err == nil && inspect.ContainerJSONBase != nil && inspect.NetworkSettings != nil {
 		for _, netCfg := range inspect.NetworkSettings.Networks {
 			if netCfg.IPAddress != "" {
+				log.Printf("DEBUG ResolveHost(%q): found by direct inspect, IP=%s", hostname, netCfg.IPAddress)
 				return netCfg.IPAddress, nil
 			}
 		}
+		log.Printf("DEBUG ResolveHost(%q): direct inspect OK but no network IP (networks=%v)", hostname, inspect.NetworkSettings.Networks)
+	} else if err != nil {
+		log.Printf("DEBUG ResolveHost(%q): direct inspect error: %v", hostname, err)
+	} else {
+		log.Printf("DEBUG ResolveHost(%q): direct inspect returned nil ContainerJSONBase or NetworkSettings", hostname)
 	}
-	if err != nil {
-		log.Printf("DEBUG ContainerInspect(%q): %v", hostname, err)
-		// ContainerInspect by exact name failed. Try listing all containers
-		// and matching by name prefix or label (compose service name).
-		containers, listErr := d.apiClient.ContainerList(ctx, container.ListOptions{})
-		if listErr == nil {
-			for _, c := range containers {
-				for _, name := range c.Names {
-					if strings.TrimPrefix(name, "/") == hostname {
-						// Found by container name -- inspect with the ID.
-						inspect, err = d.apiClient.ContainerInspect(ctx, c.ID)
-						if err == nil && inspect.ContainerJSONBase != nil {
-							for _, netCfg := range inspect.NetworkSettings.Networks {
-								if netCfg.IPAddress != "" {
-									return netCfg.IPAddress, nil
-								}
-							}
-						}
-						break
-					}
-				}
-				// Also check compose labels for service name.
-				if svc, ok := c.Labels["com.docker.compose.service"]; ok && svc == hostname {
+
+	// --- 2. ContainerList fallback ---
+	containers, listErr := d.apiClient.ContainerList(ctx, container.ListOptions{})
+	if listErr == nil {
+		// Try matching by container name first.
+		for _, c := range containers {
+			for _, name := range c.Names {
+				if strings.TrimPrefix(name, "/") == hostname {
+					log.Printf("DEBUG ResolveHost(%q): found in ContainerList by name", hostname)
 					inspect, err = d.apiClient.ContainerInspect(ctx, c.ID)
-					if err == nil && inspect.ContainerJSONBase != nil {
+					if err == nil && inspect.ContainerJSONBase != nil && inspect.NetworkSettings != nil {
 						for _, netCfg := range inspect.NetworkSettings.Networks {
 							if netCfg.IPAddress != "" {
+								log.Printf("DEBUG ResolveHost(%q): IP=%s (by ID after name match)", hostname, netCfg.IPAddress)
 								return netCfg.IPAddress, nil
 							}
 						}
+						log.Printf("DEBUG ResolveHost(%q): inspect by ID OK but no network IP", hostname)
+					} else if err != nil {
+						log.Printf("DEBUG ResolveHost(%q): inspect by ID error: %v", hostname, err)
 					}
+					break
 				}
 			}
 		}
-		// Log container names for debugging.
-		if listErr == nil {
-			names := make([]string, 0, len(containers))
-			for _, c := range containers {
-				names = append(names, c.Names...)
+		// Try matching by compose service label.
+		for _, c := range containers {
+			if svc, ok := c.Labels["com.docker.compose.service"]; ok && svc == hostname {
+				log.Printf("DEBUG ResolveHost(%q): found in ContainerList by compose label", hostname)
+				inspect, err = d.apiClient.ContainerInspect(ctx, c.ID)
+				if err == nil && inspect.ContainerJSONBase != nil && inspect.NetworkSettings != nil {
+					for _, netCfg := range inspect.NetworkSettings.Networks {
+						if netCfg.IPAddress != "" {
+							log.Printf("DEBUG ResolveHost(%q): IP=%s (by ID after compose label match)", hostname, netCfg.IPAddress)
+							return netCfg.IPAddress, nil
+						}
+					}
+					log.Printf("DEBUG ResolveHost(%q): compose match inspect OK but no network IP", hostname)
+				} else if err != nil {
+					log.Printf("DEBUG ResolveHost(%q): compose match inspect error: %v", hostname, err)
+				}
 			}
-			log.Printf("DEBUG available containers: %v", names)
-		} else {
-			log.Printf("DEBUG ContainerList: %v", listErr)
 		}
+		// Log all container names for debugging.
+		names := make([]string, 0, len(containers))
+		for _, c := range containers {
+			names = append(names, c.Names...)
+		}
+		log.Printf("DEBUG ResolveHost(%q): available containers: %v", hostname, names)
+	} else {
+		log.Printf("DEBUG ResolveHost(%q): ContainerList error: %v", hostname, listErr)
 	}
 
-	// Fall back to Go's standard DNS resolver (works for public hostnames).
+	// --- 3. Gateway IP fallback ---
+	if gwIP, gwErr := defaultGateway(); gwErr == nil {
+		log.Printf("DEBUG ResolveHost(%q): gateway fallback -> %s", hostname, gwIP)
+		return gwIP.String(), nil
+	} else {
+		log.Printf("DEBUG ResolveHost(%q): gateway fallback error: %v", hostname, gwErr)
+	}
+
+	// --- 4. Standard DNS (last resort for internet hostnames) ---
 	ips, err := net.LookupHost(hostname)
 	if err != nil || len(ips) == 0 {
 		return "", fmt.Errorf("resolve %s: %w", hostname, err)
 	}
+	log.Printf("DEBUG ResolveHost(%q): DNS fallback -> %s", hostname, ips[0])
 	return ips[0], nil
+}
+
+// defaultGateway reads the default gateway IP from /proc/net/route.
+// This is a pure-Go approach that does not depend on Docker DNS or the Docker
+// API, making it suitable as a last-resort fallback when both fail.
+func defaultGateway() (net.IP, error) {
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return nil, fmt.Errorf("read /proc/net/route: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines[1:] { // skip header
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[1] == "00000000" { // destination 0.0.0.0 (default route)
+			gw, parseErr := strconv.ParseUint(fields[2], 16, 32)
+			if parseErr != nil {
+				continue
+			}
+			// /proc/net/route stores IPs in little-endian hex.
+			return net.IPv4(
+				byte(gw>>0),
+				byte(gw>>8),
+				byte(gw>>16),
+				byte(gw>>24),
+			), nil
+		}
+	}
+	return nil, fmt.Errorf("no default gateway found in /proc/net/route")
 }
 
 func (d *DockerSandbox) lookup(sessionID string) (*containerState, error) {
