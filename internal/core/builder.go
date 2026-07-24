@@ -171,6 +171,36 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 		log.Printf("bootstrap: plugin %s started", p.Name())
 	}
 
+	// Subscribe to plugin message subjects so communication plugins (Discord,
+	// Slack) can submit tasks via the event bus. Each user.message event is
+	// converted into a task and submitted to the coordinator.
+	if co != nil {
+		pluginSubjects := []string{
+			schemas.Subject("plugin", "discord", "message"),
+			schemas.Subject("plugin", "slack", "message"),
+		}
+		for _, subj := range pluginSubjects {
+			if _, err := bus.Subscribe(ctx, subj,
+				func(ctx context.Context, evt schemas.Event) error {
+					msg, ok := evt.Payload.(schemas.UserMessage)
+					if !ok {
+						return fmt.Errorf("unexpected payload type %T for %s", evt.Payload, subj)
+					}
+					taskID := fmt.Sprintf("%s_%d", msg.Plugin, time.Now().UnixNano())
+					log.Printf("bootstrap: submitting task from %s: %q", subj, msg.Text)
+					go func() {
+						if err := co.SubmitTask(ctx, taskID, msg.Text); err != nil {
+							log.Printf("bootstrap: submit task from %s: %v", subj, err)
+						}
+					}()
+					return nil
+				},
+			); err != nil {
+				return nil, fmt.Errorf("subscribe to %s: %w", subj, err)
+			}
+		}
+	}
+
 	return &App{
 		Config:       cfg,
 		EventBus:     bus,
