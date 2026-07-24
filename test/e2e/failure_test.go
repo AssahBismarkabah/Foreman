@@ -187,7 +187,12 @@ func injectMockLLMService(src string) string {
 	// Add the mockllm service definition before the foreman service.
 	// The trailing newline (no spaces) ensures the next line (foreman:)
 	// starts at the correct 2-space indent level.
+	// container_name is set so Docker's embedded DNS (which resolves container
+	// names) works for sandbox containers created via the Docker API (not by
+	// compose). Without this, only compose-managed containers get the service
+	// name as a DNS alias, and the sandbox can't resolve "mockllm".
 	mockLLMSvc := `  mockllm:
+    container_name: mockllm
     image: foreman:e2e-mockllm
     ports:
       - "9999"
