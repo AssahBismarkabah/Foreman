@@ -18,6 +18,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-units"
@@ -32,13 +33,22 @@ type containerState struct {
 // Each sandbox runs "tail -f /dev/null" as its main process to stay alive;
 // actual commands are executed via the Docker SDK exec API.
 type DockerSandbox struct {
-	image      string
-	apiClient  *client.Client
-	mu         sync.Mutex
-	containers map[string]*containerState // sessionID -> container
+	image          string
+	defaultNetwork string // Docker network to join (empty = default bridge)
+	apiClient      *client.Client
+	mu             sync.Mutex
+	containers     map[string]*containerState // sessionID -> container
 }
 
 func NewDockerSandbox(image string) (*DockerSandbox, error) {
+	return newDockerSandbox(image, "")
+}
+
+func NewDockerSandboxWithNetwork(image, network string) (*DockerSandbox, error) {
+	return newDockerSandbox(image, network)
+}
+
+func newDockerSandbox(image, network string) (*DockerSandbox, error) {
 	// Use DOCKER_HOST env var if set, otherwise default to the standard socket.
 	// Importantly, we do NOT use client.FromEnv alone because Docker SDK v28+
 	// reads the Docker config file's currentContext, which on OrbStack points to
@@ -62,9 +72,10 @@ func NewDockerSandbox(image string) (*DockerSandbox, error) {
 	}
 
 	return &DockerSandbox{
-		image:      image,
-		apiClient:  cli,
-		containers: make(map[string]*containerState),
+		image:          image,
+		defaultNetwork: network,
+		apiClient:      cli,
+		containers:     make(map[string]*containerState),
 	}, nil
 }
 
@@ -128,7 +139,21 @@ func (d *DockerSandbox) Provision(ctx context.Context, spec SandboxSpec) (string
 		hostCfg.NanoCPUs = int64(cpu * 1e9)
 	}
 
-	resp, err := d.apiClient.ContainerCreate(ctx, cfg, hostCfg, nil, nil, sessionID)
+	// Attach to a Docker network (from spec, config default, or default bridge).
+	netName := spec.Network
+	if netName == "" {
+		netName = d.defaultNetwork
+	}
+	var netCfg *network.NetworkingConfig
+	if netName != "" {
+		netCfg = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				netName: {},
+			},
+		}
+	}
+
+	resp, err := d.apiClient.ContainerCreate(ctx, cfg, hostCfg, netCfg, nil, sessionID)
 	if err != nil {
 		return "", fmt.Errorf("container create: %w", err)
 	}

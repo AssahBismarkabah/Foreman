@@ -1216,7 +1216,7 @@ func TestE2E_OpenCodeAdapter(t *testing.T) {
 	// The opencode adapter uses "opencode" as the command (installed in the
 	// foreman:e2e-opencode image). The mock LLM server is at
 	// http://mockllm:9999/v1 (wired in by injectMockLLMService).
-	customCfg := `subsystems:
+	customCfg := fmt.Sprintf(`subsystems:
   eventbus:
     kind: memory
   statestore:
@@ -1227,6 +1227,7 @@ func TestE2E_OpenCodeAdapter(t *testing.T) {
   sandbox:
     kind: docker
     image: foreman:e2e-sandbox-opencode
+    network: %s_default
   coordinator:
     max_concurrent: 5
     default_timeout: 5m
@@ -1245,7 +1246,7 @@ func TestE2E_OpenCodeAdapter(t *testing.T) {
       source: env
       env_var_name: FOREMAN_SIGNING_KEY
       key_id: foreman-1
-`
+`, projectName)
 	if err := os.WriteFile(cfgPath, []byte(customCfg), 0644); err != nil {
 		t.Fatalf("write custom config: %v", err)
 	}

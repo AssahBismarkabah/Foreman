@@ -33,6 +33,7 @@ type EventBusConfig struct {
 type SandboxConfig struct {
 	Kind               string `yaml:"kind"` // "docker" | "gvisor" | "kata"
 	Image              string `yaml:"image"`
+	Network            string `yaml:"network"`              // Docker network to join (empty = default bridge)
 	StatsInterval      string `yaml:"stats_interval"`       // how often to poll stats (e.g. "30s"), empty = disabled
 	CPUAlertPercent    string `yaml:"cpu_alert_percent"`    // CPU threshold alert (e.g. "80"), empty = no alert
 	MemoryAlertPercent string `yaml:"memory_alert_percent"` // memory threshold alert (e.g. "90"), empty = no alert

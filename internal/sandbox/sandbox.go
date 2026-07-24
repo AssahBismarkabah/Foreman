@@ -30,6 +30,7 @@ type SandboxSpec struct {
 	CPU     string
 	Env     map[string]string
 	WorkDir string
+	Network string // Docker network to join (empty = default bridge)
 }
 
 type SandboxEvent struct {
