@@ -403,6 +403,20 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		log.Printf("DEBUG sandbox env exec failed: %v", err)
 	}
 
+	// DEBUG: verify DNS/HTTP connectivity to mockllm (only meaningful when
+	// OPENAI_BASE_URL is set, e.g. test environments). A failure here means
+	// the sandbox container can't reach the LLM endpoint.
+	if os.Getenv("OPENAI_BASE_URL") != "" {
+		if dbg, err := c.sbox.Execute(heartbeatCtx, sandboxID,
+			[]string{"sh", "-c",
+				"echo '---HTTP---'; wget -q -O /dev/null -T 5 http://mockllm:9999/healthz 2>&1 && echo OK || echo FAIL; echo '---DNS---'; getent hosts mockllm 2>&1 || true",
+			}, 10*time.Second); err == nil {
+			log.Printf("DEBUG mockllm connectivity:\n%s", dbg.Stdout)
+		} else {
+			log.Printf("DEBUG mockllm connectivity FAILED: %v", err)
+		}
+	}
+
 	// DEBUG: log the exact command being executed
 	log.Printf("DEBUG executing in sandbox %s: %v", sandboxID, args)
 
