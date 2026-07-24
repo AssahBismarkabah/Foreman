@@ -392,6 +392,17 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 	// --- Execute the agent in the sandbox ---
 	// The heartbeat monitor can cancel heartbeatCtx to interrupt the agent
 	// if the sandbox stops responding.
+
+	// DEBUG: log env vars being passed to sandbox
+	log.Printf("DEBUG sandbox env: %v", env)
+
+	// DEBUG: exec env in sandbox to verify env vars are set
+	if dbg, err := c.sbox.Execute(heartbeatCtx, sandboxID, []string{"env"}, 5*time.Second); err == nil {
+		log.Printf("DEBUG sandbox container env:\n%s", dbg.Stdout)
+	} else {
+		log.Printf("DEBUG sandbox env exec failed: %v", err)
+	}
+
 	result, execErr := c.sbox.Execute(heartbeatCtx, sandboxID, args, 0)
 
 	// Check if execution was interrupted by heartbeat failure.
