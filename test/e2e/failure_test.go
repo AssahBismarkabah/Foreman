@@ -107,10 +107,11 @@ func TestMain(m *testing.M) {
 func buildMockLLM() {
 	// Build the Go binary for the mock LLM server.
 	// Cross-compile for Linux so the binary works in the Linux Docker container.
+	// CGO_ENABLED=0 ensures a static binary that runs on scratch.
 	// go build -o mockllm .  (from test/e2e/mockllm/)
 	buildCmd := exec.Command("go", "build", "-o", "mockllm", ".")
 	buildCmd.Dir = "mockllm"
-	buildCmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64")
+	buildCmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
 	if err := buildCmd.Run(); err != nil {
