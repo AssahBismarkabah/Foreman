@@ -106,9 +106,11 @@ func TestMain(m *testing.M) {
 // CWD is test/e2e/ -- the mockllm source is at test/e2e/mockllm/.
 func buildMockLLM() {
 	// Build the Go binary for the mock LLM server.
+	// Cross-compile for Linux so the binary works in the Linux Docker container.
 	// go build -o mockllm .  (from test/e2e/mockllm/)
 	buildCmd := exec.Command("go", "build", "-o", "mockllm", ".")
 	buildCmd.Dir = "mockllm"
+	buildCmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64")
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
 	if err := buildCmd.Run(); err != nil {
@@ -321,6 +323,107 @@ func (s *composeStack) dumpLogs() {
 	cmd.Dir = s.composeDir
 	logs, _ := cmd.CombinedOutput()
 	s.t.Logf("Foreman logs:\n%s", logs)
+
+	cmd2 := exec.Command("docker", append(s.composeArgs, "logs", "mockllm")...)
+	cmd2.Dir = s.composeDir
+	logs2, _ := cmd2.CombinedOutput()
+	s.t.Logf("mockllm logs:\n%s", logs2)
+
+	// Capture sandbox container logs if one exists.
+	// Sandbox containers are created by Foreman at runtime via the Docker
+	// API (not compose), so we use docker logs directly.
+	if containerID := s.findSandboxContainerOrEmpty(); containerID != "" {
+		cmd3 := exec.Command("docker", "logs", containerID)
+		cmd3.Dir = s.composeDir
+		logs3, _ := cmd3.CombinedOutput()
+		s.t.Logf("sandbox container logs:\n%s", logs3)
+	}
+}
+
+func (s *composeStack) checkMockLLMHealth() {
+	s.t.Helper()
+	s.t.Log("Checking mockllm health from host...")
+	resp, err := http.Get("http://localhost:9999/healthz")
+	if err != nil {
+		s.t.Logf("mockllm health check FAILED: %v", err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	s.t.Logf("mockllm health check: HTTP %d", resp.StatusCode)
+}
+
+// checkSandboxToMockLLMConnectivity runs a curl command inside the sandbox
+// container to verify it can reach mockllm on the Docker network.
+func (s *composeStack) checkSandboxToMockLLMConnectivity() {
+	s.t.Helper()
+	containerID := s.findSandboxContainerOrEmpty()
+	if containerID == "" {
+		s.t.Log("checkSandboxToMockLLMConnectivity: no sandbox container found (not yet provisioned)")
+		return
+	}
+	s.t.Logf("Checking sandbox %s connectivity to mockllm...", containerID[:12])
+
+	// Check if the sandbox container is still running.
+	inspectOut, inspectErr := s.runDocker("inspect", containerID, "--format", "{{.State.Running}}")
+	if inspectErr != nil {
+		s.t.Logf("sandbox container inspect error: %v (output: %s)", inspectErr, inspectOut)
+		return
+	}
+	isRunning := strings.TrimSpace(string(inspectOut))
+	s.t.Logf("sandbox container running: %s", isRunning)
+	if isRunning != "true" {
+		s.t.Log("sandbox container is NOT running -- connectivity check skipped")
+		return
+	}
+
+	// Check what processes are running inside the sandbox.
+	procCheck := s.sandboxExec(containerID, "ps", "aux")
+	s.t.Logf("sandbox processes:\n%s", procCheck)
+
+	// Check if curl is available in the sandbox.
+	curlCheck := s.sandboxExec(containerID, "which", "curl")
+	s.t.Logf("sandbox curl availability: %q", curlCheck)
+
+	// Check if wget is available in the sandbox.
+	wgetCheck := s.sandboxExec(containerID, "which", "wget")
+	s.t.Logf("sandbox wget availability: %q", wgetCheck)
+
+	// Try to resolve mockllm from inside the sandbox.
+	dnsCheck := s.sandboxExec(containerID, "getent", "hosts", "mockllm")
+	s.t.Logf("sandbox DNS resolution for mockllm: %q", dnsCheck)
+
+	// Try curl first (without -q to see errors), fall back to wget.
+	cmd := s.sandboxExec(containerID, "curl", "-v", "--connect-timeout", "5", "-s", "-o", "/dev/null", "-w", "HTTP_CODE:%{http_code}", "http://mockllm:9999/healthz")
+	output := strings.TrimSpace(cmd)
+	if output == "" {
+		// curl might not be available or produced no output, try wget (without -q)
+		s.t.Log("curl produced no output, trying wget without -q...")
+		cmd = s.sandboxExec(containerID, "wget", "--timeout=5", "-O", "-", "http://mockllm:9999/healthz")
+		if strings.Contains(cmd, "healthy") || strings.Contains(cmd, "ok") {
+			s.t.Logf("sandbox->mockllm connectivity: OK (wget)")
+		} else if cmd == "" {
+			s.t.Logf("sandbox->mockllm connectivity: wget returned empty output (exit code unknown)")
+		} else {
+			s.t.Logf("sandbox->mockllm connectivity: wget output: %q", cmd)
+		}
+	} else {
+		s.t.Logf("sandbox->mockllm connectivity: %s", output)
+	}
+}
+
+// sandboxExec runs a command inside a sandbox container and returns stdout.
+func (s *composeStack) sandboxExec(containerID string, args ...string) string {
+	s.t.Helper()
+	execArgs := []string{"exec"}
+	execArgs = append(execArgs, containerID)
+	execArgs = append(execArgs, args...)
+	cmd := exec.Command("docker", execArgs...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s.t.Logf("sandbox exec FAILED: %v\ncommand: docker %v\noutput: %s", err, execArgs, string(out))
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (s *composeStack) submitTask(taskID, description string) string {
@@ -485,6 +588,16 @@ func (s *composeStack) findSandboxContainer() string {
 		s.t.Fatal("no sandbox container found")
 	}
 	return id
+}
+
+// findSandboxContainerOrEmpty is like findSandboxContainer but returns
+// an empty string instead of failing when no sandbox is found.
+func (s *composeStack) findSandboxContainerOrEmpty() string {
+	out, err := s.runDocker("ps", "-n", "1", "--filter", "name=foreman-sbox-", "--format", "{{.ID}}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // submitTaskStatus submits a task and returns the HTTP status code and response body.
@@ -1292,10 +1405,13 @@ func TestE2E_OpenCodeAdapter(t *testing.T) {
 	defer stack.teardown()
 	stack.up()
 	stack.waitForHealth()
+	stack.checkMockLLMHealth()
 
 	sid := stack.submitTask("opencode_e2e", "say hello and output the word hello")
-	// Short timeout so the test fails fast and dumpLogs() fires before the
-	// overall Go test timeout (240s) kills the process with SIGQUIT.
+	// Wait for RUNNING so the sandbox is provisioned before checking connectivity.
+	stack.waitForStatus(sid, 30*time.Second, "RUNNING")
+	stack.checkSandboxToMockLLMConnectivity()
+	// Now wait for the session to reach a terminal state.
 	status := stack.waitForStatus(sid, 30*time.Second, "COMPLETED", "FAILED")
 
 	if status != "COMPLETED" {

@@ -18,8 +18,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -59,8 +61,21 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read and log the request body for debugging.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("mockllm: failed to read request body: %v", err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	log.Printf("mockllm: received %s %s (body=%d bytes)", r.Method, r.URL.Path, len(bodyBytes))
+	if len(bodyBytes) > 0 && len(bodyBytes) < 2000 {
+		log.Printf("mockllm: request body: %s", string(bodyBytes))
+	}
+
 	var req chatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -108,9 +123,60 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	writeDone(w)
 }
 
+// loggingMiddleware logs all incoming requests and their duration.
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		log.Printf("mockllm: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		next.ServeHTTP(w, r)
+		log.Printf("mockllm: %s %s completed in %v", r.Method, r.URL.Path, time.Since(start))
+	})
+}
+
+// handleResponses handles OpenAI's /v1/responses endpoint with SSE streaming.
+func handleResponses(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("mockllm: failed to read request body: %v", err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	log.Printf("mockllm: received %s %s (body=%d bytes)", r.Method, r.URL.Path, len(bodyBytes))
+	if len(bodyBytes) > 0 && len(bodyBytes) < 2000 {
+		log.Printf("mockllm: request body: %s", string(bodyBytes))
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	// Streaming response for Responses API
+	// 1) Role announcement
+	writeSSE(w, `{"type":"response.output_item.added","item":{"type":"message","role":"assistant","content":[]}}`)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// 2) Content delta
+	writeSSE(w, `{"type":"response.output_text.delta","delta":"Hello from mock LLM. Task completed successfully."}`)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// 3) Done
+	writeSSE(w, `{"type":"response.completed","response":{"status":"completed"}}`)
+
+	writeDone(w)
+}
+
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", handleChat)
+	mux.HandleFunc("/v1/responses", handleResponses)
 	// Health endpoint for compose health checks
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -119,5 +185,5 @@ func main() {
 
 	addr := ":9999"
 	log.Printf("mock LLM server listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, loggingMiddleware(mux)))
 }
