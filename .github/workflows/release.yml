@@ -107,9 +107,17 @@ jobs:
           script: |
             docker pull ghcr.io/${{ env.IMAGE_LOWER }}:latest
             echo "${{ secrets.GITHUB_TOKEN }}" | sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            # Write API key to env file so it persists
-            sudo sed -i '/^OPENAI_API_KEY=/d' /opt/foreman/config/env 2>/dev/null || true
-            echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" | sudo tee -a /opt/foreman/config/env
+            # Write LLM env vars so the coordinator can pass them to the sandbox
+            for pair in \
+              "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
+              "OPENAI_BASE_URL=${{ secrets.OPENAI_BASE_URL }}" \
+              "OPENAI_MODEL=${{ secrets.OPENAI_MODEL }}"; do
+              key="${pair%%=*}"
+              val="${pair#*=}"
+              [ -z "$val" ] && continue
+              sudo sed -i "/^${key}=/d" /opt/foreman/config/env 2>/dev/null || true
+              echo "$pair" | sudo tee -a /opt/foreman/config/env
+            done
             sudo systemctl restart foreman 2>&1 || {
               echo "=== Foreman restart failed, collecting diagnostics ==="
               sudo journalctl -u foreman --no-pager -n 80
