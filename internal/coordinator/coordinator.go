@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -306,6 +307,23 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 
 	// --- Generate scoped agent token (if issuer is configured) ---
 	env := map[string]string{}
+
+	// Pass through LLM provider env vars from the host so the agent (e.g.
+	// opencode) can call the LLM API inside the sandbox container.
+	for _, k := range []string{
+		"OPENAI_API_KEY",
+		"OPENAI_BASE_URL",
+		"OPENAI_MODEL",
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_BASE_URL",
+		"GOOGLE_API_KEY",
+		"OPENROUTER_API_KEY",
+	} {
+		if v := os.Getenv(k); v != "" {
+			env[k] = v
+		}
+	}
+
 	if c.tokenIssuer != nil {
 		scope := &identity.AgentScope{
 			Actions: []string{"read", "pull"},
