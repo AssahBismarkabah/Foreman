@@ -25,12 +25,13 @@ type ExecutionResult struct {
 }
 
 type SandboxSpec struct {
-	Image   string
-	Memory  string
-	CPU     string
-	Env     map[string]string
-	WorkDir string
-	Network string // Docker network to join (empty = default bridge)
+	Image      string
+	Memory     string
+	CPU        string
+	Env        map[string]string
+	WorkDir    string
+	Network    string   // Docker network to join (empty = default bridge)
+	ExtraHosts []string // /etc/hosts entries (e.g. "hostname:host-gateway")
 }
 
 type SandboxEvent struct {

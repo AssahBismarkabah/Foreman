@@ -329,13 +329,14 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		}
 	}
 
-	// Resolve LLM endpoint hostnames from this process's DNS (Foreman runs on
-	// the compose network and can resolve compose service names) and replace
-	// them with IP addresses in the env vars, so the sandbox container doesn't
-	// need Docker DNS to resolve compose service names. This is needed because
-	// the sandbox is a standalone container created via the Docker API, not a
-	// compose-managed service, and Docker DNS for compose network aliases does
-	// not reliably work for standalone containers on all CI platforms.
+	// Resolve LLM endpoint hostnames from this process's DNS and add extra_hosts
+	// entries so the sandbox can reach the LLM API without depending on Docker
+	// DNS (which does not reliably work for standalone containers on compose
+	// networks across all CI platforms). When DNS resolution from this process
+	// succeeds the hostname is replaced with an IP address directly in the env
+	// var. When it fails (common for compose service names) an extra_hosts
+	// entry mapping the hostname to host-gateway is added as a fallback.
+	var extraHosts []string
 	for _, key := range []string{"OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"} {
 		val, ok := env[key]
 		if !ok {
@@ -346,18 +347,23 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 			continue
 		}
 		host := u.Hostname()
-		ips, err := net.LookupHost(host)
-		if err != nil || len(ips) == 0 {
-			continue
+		if net.ParseIP(host) != nil {
+			continue // already an IP address, no resolution needed
 		}
-		port := u.Port()
-		if port != "" {
-			u.Host = net.JoinHostPort(ips[0], port)
+		ips, dnsErr := net.LookupHost(host)
+		if dnsErr == nil && len(ips) > 0 {
+			port := u.Port()
+			if port != "" {
+				u.Host = net.JoinHostPort(ips[0], port)
+			} else {
+				u.Host = ips[0]
+			}
+			env[key] = u.String()
+			log.Printf("DEBUG resolved %s hostname %s -> %s", key, host, ips[0])
 		} else {
-			u.Host = ips[0]
+			extraHosts = append(extraHosts, host+":host-gateway")
+			log.Printf("DEBUG fallback extra_hosts %s -> host-gateway (DNS: %v)", host, dnsErr)
 		}
-		env[key] = u.String()
-		log.Printf("DEBUG resolved %s hostname %s -> %s", key, host, ips[0])
 	}
 
 	if c.tokenIssuer != nil {
@@ -374,8 +380,9 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 
 	// --- Provision a sandbox ---
 	sandboxID, err := c.sbox.Provision(ctx, sandbox.SandboxSpec{
-		WorkDir: "/workspace",
-		Env:     env,
+		WorkDir:    "/workspace",
+		Env:        env,
+		ExtraHosts: extraHosts,
 	})
 	if err != nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("provision sandbox: %w", err))

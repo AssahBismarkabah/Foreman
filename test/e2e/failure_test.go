@@ -195,7 +195,7 @@ func injectMockLLMService(src string) string {
     container_name: mockllm
     image: foreman:e2e-mockllm
     ports:
-      - "9999"
+      - "9999:9999"
 
 `
 	src = strings.Replace(src, "\n  foreman:\n", "\n"+mockLLMSvc+"  foreman:\n", 1)

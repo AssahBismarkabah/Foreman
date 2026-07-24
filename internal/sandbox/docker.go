@@ -138,6 +138,9 @@ func (d *DockerSandbox) Provision(ctx context.Context, spec SandboxSpec) (string
 		}
 		hostCfg.NanoCPUs = int64(cpu * 1e9)
 	}
+	if len(spec.ExtraHosts) > 0 {
+		hostCfg.ExtraHosts = spec.ExtraHosts
+	}
 
 	// Attach to a Docker network (from spec, config default, or default bridge).
 	netName := spec.Network
