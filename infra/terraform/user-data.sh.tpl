@@ -29,6 +29,17 @@ systemctl enable docker
 mkdir -p /opt/foreman/{bin,config,data}
 cd /opt/foreman
 
+# --- Build Custom Sandbox Image with opencode ---
+echo "Building custom sandbox image with opencode..."
+cat > /tmp/sandbox-opencode.Dockerfile << 'SANDBOX_DOCKERFILE'
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y curl ca-certificates git nodejs npm && \
+    npm install -g opencode-ai@latest && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+SANDBOX_DOCKERFILE
+docker build -t foreman-sandbox-opencode:latest -f /tmp/sandbox-opencode.Dockerfile /tmp
+rm /tmp/sandbox-opencode.Dockerfile
+
 # --- GHCR Authentication ---
 # If a GHCR token is provided, log in to pull private images.
 %{ if ghcr_token != "" ~}
@@ -70,7 +81,7 @@ subsystems:
 
   sandbox:
     kind: docker
-    image: ubuntu:22.04
+    image: foreman-sandbox-opencode:latest
 
   coordinator:
     max_concurrent: 5
