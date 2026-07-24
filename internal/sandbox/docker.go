@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -552,6 +553,31 @@ func (d *DockerSandbox) Destroy(ctx context.Context, sessionID string) error {
 	d.mu.Unlock()
 
 	return nil
+}
+
+// ResolveHost resolves a hostname to an IP address. It first tries Docker's
+// embedded DNS by inspecting the container directly (for Docker compose service
+// names or container names on the same network). If that fails, it falls back
+// to Go's standard DNS resolver for internet hostnames.
+func (d *DockerSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
+	// Try Docker DNS first: inspect the container by name.
+	inspect, err := d.apiClient.ContainerInspect(ctx, hostname)
+	if err == nil && inspect.ContainerJSONBase != nil {
+		// Found a Docker container with this name. Return its IP on the
+		// first attached network.
+		for _, netCfg := range inspect.NetworkSettings.Networks {
+			if netCfg.IPAddress != "" {
+				return netCfg.IPAddress, nil
+			}
+		}
+	}
+
+	// Fall back to Go's standard DNS resolver (works for public hostnames).
+	ips, err := net.LookupHost(hostname)
+	if err != nil || len(ips) == 0 {
+		return "", fmt.Errorf("resolve %s: %w", hostname, err)
+	}
+	return ips[0], nil
 }
 
 func (d *DockerSandbox) lookup(sessionID string) (*containerState, error) {

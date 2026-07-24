@@ -67,6 +67,9 @@ func (m *mockSandbox) Heartbeat(ctx context.Context, sessionID string) error {
 func (m *mockSandbox) Destroy(ctx context.Context, sessionID string) error {
 	return nil
 }
+func (m *mockSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
+	return "", fmt.Errorf("mock: cannot resolve %s", hostname)
+}
 
 func newTestCoordinator(t *testing.T) (*Coordinator, context.Context) {
 	t.Helper()
@@ -400,6 +403,9 @@ func (m *failSandbox) SubscribeEvents(ctx context.Context, sessionID string) (<-
 }
 func (m *failSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
 func (m *failSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+func (m *failSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
+	return "", fmt.Errorf("mock: cannot resolve %s", hostname)
+}
 
 // provisionFailSandbox returns an error from Provision.
 type provisionFailSandbox struct{}
@@ -424,6 +430,9 @@ func (m *provisionFailSandbox) SubscribeEvents(ctx context.Context, sessionID st
 }
 func (m *provisionFailSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
 func (m *provisionFailSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+func (m *provisionFailSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
+	return "", fmt.Errorf("mock: cannot resolve %s", hostname)
+}
 
 // verifyFailAdapter fails when Verify is called.
 type verifyFailAdapter struct {
@@ -475,6 +484,9 @@ func (m *multiLineSandbox) SubscribeEvents(ctx context.Context, sessionID string
 }
 func (m *multiLineSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
 func (m *multiLineSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+func (m *multiLineSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
+	return "", fmt.Errorf("mock: cannot resolve %s", hostname)
+}
 
 // heartbeatFailSandbox returns success from Heartbeat for the first call,
 // then returns errors. Execute blocks until the context is cancelled.
@@ -514,6 +526,9 @@ func (m *heartbeatFailSandbox) Heartbeat(ctx context.Context, sessionID string) 
 	return nil
 }
 func (m *heartbeatFailSandbox) Destroy(ctx context.Context, sessionID string) error { return nil }
+func (m *heartbeatFailSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
+	return "", fmt.Errorf("mock: cannot resolve %s", hostname)
+}
 
 // blockingSandbox blocks Execute until context is cancelled.
 type blockingSandbox struct{}
@@ -539,6 +554,9 @@ func (m *blockingSandbox) SubscribeEvents(ctx context.Context, sessionID string)
 }
 func (m *blockingSandbox) Heartbeat(ctx context.Context, sessionID string) error { return nil }
 func (m *blockingSandbox) Destroy(ctx context.Context, sessionID string) error   { return nil }
+func (m *blockingSandbox) ResolveHost(ctx context.Context, hostname string) (string, error) {
+	return "", fmt.Errorf("mock: cannot resolve %s", hostname)
+}
 
 func TestCoordinatorCrashDetectionAndRetry(t *testing.T) {
 	bus := eventbus.NewMemoryBus()

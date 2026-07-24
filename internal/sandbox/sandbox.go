@@ -48,4 +48,9 @@ type Sandbox interface {
 	SubscribeEvents(ctx context.Context, sessionID string) (<-chan SandboxEvent, error)
 	Heartbeat(ctx context.Context, sessionID string) error
 	Destroy(ctx context.Context, sessionID string) error
+	// ResolveHost resolves a hostname to an IP address using the sandbox
+	// runtime's internal DNS or container registry. For Docker sandboxes this
+	// uses Docker's embedded DNS for container name resolution, falling back
+	// to Go's net.LookupHost if the Docker DNS fails.
+	ResolveHost(ctx context.Context, hostname string) (string, error)
 }
