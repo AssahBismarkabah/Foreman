@@ -403,6 +403,9 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description strin
 		log.Printf("DEBUG sandbox env exec failed: %v", err)
 	}
 
+	// DEBUG: log the exact command being executed
+	log.Printf("DEBUG executing in sandbox %s: %v", sandboxID, args)
+
 	result, execErr := c.sbox.Execute(heartbeatCtx, sandboxID, args, 0)
 
 	// Check if execution was interrupted by heartbeat failure.

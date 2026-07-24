@@ -366,6 +366,8 @@ func (s *composeStack) waitForStatus(sessionID string, timeout time.Duration, st
 	}
 
 	deadline := time.Now().Add(timeout)
+	logTick := time.NewTicker(10 * time.Second)
+	defer logTick.Stop()
 	for time.Now().Before(deadline) {
 		resp, err := http.Get("http://localhost:8080/api/v1/sessions/" + sessionID)
 		if err != nil {
@@ -385,6 +387,14 @@ func (s *composeStack) waitForStatus(sessionID string, timeout time.Duration, st
 		s.t.Logf("Session %s status: %s", sessionID, session.Status)
 		if statusMap[session.Status] {
 			return session.Status
+		}
+
+		// Periodically dump Foreman logs so we can see coordinator debug
+		// output even if the test is killed by SIGQUIT.
+		select {
+		case <-logTick.C:
+			s.dumpLogs()
+		default:
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -1279,7 +1289,9 @@ func TestE2E_OpenCodeAdapter(t *testing.T) {
 	stack.waitForHealth()
 
 	sid := stack.submitTask("opencode_e2e", "say hello and output the word hello")
-	status := stack.waitForStatus(sid, 90*time.Second, "COMPLETED", "FAILED")
+	// Short timeout so the test fails fast and dumpLogs() fires before the
+	// overall Go test timeout (240s) kills the process with SIGQUIT.
+	status := stack.waitForStatus(sid, 30*time.Second, "COMPLETED", "FAILED")
 
 	if status != "COMPLETED" {
 		t.Fatalf("expected COMPLETED for opencode adapter, got %s", status)
