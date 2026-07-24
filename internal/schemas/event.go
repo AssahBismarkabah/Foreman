@@ -58,6 +58,7 @@ type TaskPayload struct {
 	TaskID      string `json:"task_id"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
+	Agent       string `json:"agent,omitempty"`
 }
 
 type AgentHeartbeatPayload struct {
@@ -80,6 +81,7 @@ type UserMessage struct {
 	Channel  string `json:"channel"`
 	Text     string `json:"text"`
 	ThreadTS string `json:"thread_ts,omitempty"`
+	Agent    string `json:"agent,omitempty"` // "opencode", "exec", etc.
 }
 
 // Message is a simple text message sent to a chat channel.

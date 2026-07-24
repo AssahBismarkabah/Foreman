@@ -200,12 +200,13 @@ func (c *Coordinator) GetSession(sessionID string) *SessionInfo {
 }
 
 // SubmitTask creates a session and starts running the task asynchronously.
-func (c *Coordinator) SubmitTask(ctx context.Context, taskID, description string) error {
+// If agent is non-empty, it selects that specific adapter; otherwise uses the first configured.
+func (c *Coordinator) SubmitTask(ctx context.Context, taskID, description, agent string) error {
 	sessionID := fmt.Sprintf("ses_%s", taskID)
-	if err := c.cp.CreateSession(ctx, sessionID, taskID, description); err != nil {
+	if err := c.cp.CreateSession(ctx, sessionID, taskID, description, agent); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
-	return c.startTask(ctx, sessionID, description)
+	return c.startTask(ctx, sessionID, description, agent)
 }
 
 // ResumeSession restarts a session that was recovered after a restart.
@@ -225,6 +226,13 @@ func (c *Coordinator) ResumeSession(ctx context.Context, sessionID, description 
 	}
 	c.mu.Unlock()
 
+	// Get the agent from the session
+	s, ok := c.cp.GetSession(sessionID)
+	if !ok {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	agent := s.Agent
+
 	if _, err := c.mcpHub.ResolveTools(ctx, sessionID); err != nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("resolve tools: %w", err))
 		return fmt.Errorf("resolve tools: %w", err)
@@ -235,12 +243,12 @@ func (c *Coordinator) ResumeSession(ctx context.Context, sessionID, description 
 	c.active[sessionID] = cancel
 	c.mu.Unlock()
 
-	go c.runAgent(runCtx, sessionID, description)
+	go c.runAgent(runCtx, sessionID, description, agent)
 	return nil
 }
 
 // startTask transitions to ALLOCATING and launches the agent goroutine.
-func (c *Coordinator) startTask(ctx context.Context, sessionID, description string) error {
+func (c *Coordinator) startTask(ctx context.Context, sessionID, description, agent string) error {
 	c.mu.Lock()
 	if !c.accepting {
 		c.mu.Unlock()
@@ -266,23 +274,32 @@ func (c *Coordinator) startTask(ctx context.Context, sessionID, description stri
 	c.active[sessionID] = cancel
 	c.mu.Unlock()
 
-	go c.runAgent(runCtx, sessionID, description)
+	go c.runAgent(runCtx, sessionID, description, agent)
 
 	return nil
 }
 
 // runAgent is the core goroutine: provision sandbox, run agent, parse output,
 // handle completion or failure, and clean up.
-func (c *Coordinator) runAgent(ctx context.Context, sessionID, description string) {
+func (c *Coordinator) runAgent(ctx context.Context, sessionID, description, agentName string) {
 	defer func() {
 		c.mu.Lock()
 		delete(c.active, sessionID)
 		c.mu.Unlock()
 	}()
 
-	// --- Pick the first configured adapter (ordered by config) ---
+	// --- Pick the adapter ---
 	var agent adapter.AgentAdapter
-	if len(c.adapterList) > 0 {
+	if agentName != "" {
+		// Look up by name
+		if a, ok := c.adapters[agentName]; ok {
+			agent = a
+		} else {
+			c.failSession(ctx, sessionID, fmt.Errorf("agent adapter %q not found", agentName))
+			return
+		}
+	} else if len(c.adapterList) > 0 {
+		// Fall back to first configured
 		agent = c.adapterList[0]
 	}
 	if agent == nil {
@@ -546,7 +563,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 				return fmt.Errorf("unexpected payload type %T", evt.Payload)
 			}
 			go func() {
-				if err := c.SubmitTask(ctx, pay.TaskID, pay.Description); err != nil {
+				if err := c.SubmitTask(ctx, pay.TaskID, pay.Description, pay.Agent); err != nil {
 					log.Printf("coordinator: submit task %s: %v", pay.TaskID, err)
 				}
 			}()
@@ -733,7 +750,12 @@ func (c *Coordinator) handleCrash(ctx context.Context, sessionID, description, s
 	}
 
 	// Retry in a new goroutine with the same context (cancellation chain intact).
-	go c.runAgent(ctx, sessionID, description)
+	s, ok := c.cp.GetSession(sessionID)
+	agent := ""
+	if ok {
+		agent = s.Agent
+	}
+	go c.runAgent(ctx, sessionID, description, agent)
 	return true
 }
 

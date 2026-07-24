@@ -95,6 +95,12 @@ func (p *Plugin) registerSlashCommands(ctx context.Context, sess *discordgo.Sess
 				Description: "Describe what you want done",
 				Required:    true,
 			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "agent",
+				Description: "Agent to use (opencode, exec)",
+				Required:    false,
+			},
 		},
 	}
 
@@ -256,11 +262,15 @@ func (p *Plugin) handleSlashCommand(s *discordgo.Session, i *discordgo.Interacti
 		return
 	}
 
-	// Extract the task text from options.
+	// Extract the task text and agent from options.
 	task := ""
+	agent := ""
 	for _, opt := range i.ApplicationCommandData().Options {
 		if opt.Name == "task" {
 			task = opt.StringValue()
+		}
+		if opt.Name == "agent" {
+			agent = opt.StringValue()
 		}
 	}
 
@@ -270,6 +280,7 @@ func (p *Plugin) handleSlashCommand(s *discordgo.Session, i *discordgo.Interacti
 		UserID:  i.Member.User.ID,
 		Channel: i.ChannelID,
 		Text:    task,
+		Agent:   agent,
 	}
 	p.publishUserMessage(i.ChannelID, msg)
 }
@@ -342,11 +353,23 @@ func (p *Plugin) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageC
 		return
 	}
 
+	// Support optional agent prefix: "opencode: fix the bug" or "exec: ls -la"
+	text := m.Content
+	agent := ""
+	if idx := strings.Index(text, ":"); idx > 0 && idx < 20 {
+		prefix := strings.TrimSpace(text[:idx])
+		if prefix == "opencode" || prefix == "exec" {
+			agent = prefix
+			text = strings.TrimSpace(text[idx+1:])
+		}
+	}
+
 	msg := schemas.UserMessage{
 		Plugin:  "discord",
 		UserID:  m.Author.ID,
 		Channel: m.ChannelID,
-		Text:    m.Content,
+		Text:    text,
+		Agent:   agent,
 	}
 	p.publishUserMessage(m.ChannelID, msg)
 }

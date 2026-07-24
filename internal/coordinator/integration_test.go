@@ -87,7 +87,7 @@ func TestIntegration_CoordinatorWithRealDocker(t *testing.T) {
 
 	// Submit the task
 	ctx := context.Background()
-	if err := co.SubmitTask(ctx, "task_integration", "echo hello from docker"); err != nil {
+	if err := co.SubmitTask(ctx, "task_integration", "echo hello from docker", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 

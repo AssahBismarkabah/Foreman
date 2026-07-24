@@ -50,6 +50,7 @@ type Session struct {
 	PluginID      string    `json:"plugin_id,omitempty"`
 	Status        string    `json:"status"` // schemas.SessionStatus as string
 	Description   string    `json:"description,omitempty"`
+	Agent         string    `json:"agent,omitempty"`
 	CheckpointRef string    `json:"checkpoint_ref,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

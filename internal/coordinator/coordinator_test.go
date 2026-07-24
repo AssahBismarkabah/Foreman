@@ -104,7 +104,7 @@ func waitForStatus(t *testing.T, cp *controlplane.ControlPlane, sessionID string
 
 func TestSubmitTask(t *testing.T) {
 	co, ctx := newTestCoordinator(t)
-	if err := co.SubmitTask(ctx, "task_1", "do something"); err != nil {
+	if err := co.SubmitTask(ctx, "task_1", "do something", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestSubmitTaskAdapterFailure(t *testing.T) {
 	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	ctx := context.Background()
-	if err := co.SubmitTask(ctx, "task_fail", "will fail"); err != nil {
+	if err := co.SubmitTask(ctx, "task_fail", "will fail", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestSubmitTaskMaxConcurrent(t *testing.T) {
 	ctx := context.Background()
 
 	// First task -- goroutine will block on BuildConfig, holding the slot
-	if err := co.SubmitTask(ctx, "task_1", "first"); err != nil {
+	if err := co.SubmitTask(ctx, "task_1", "first", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,7 +205,7 @@ func TestSubmitTaskMaxConcurrent(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Second task should fail synchronously due to max concurrent
-	err := co.SubmitTask(ctx, "task_2", "second")
+	err := co.SubmitTask(ctx, "task_2", "second", "")
 	if err == nil {
 		t.Error("expected error for exceeding max concurrent tasks")
 	}
@@ -263,7 +263,7 @@ func TestFullPipeline_EventsPublishedOnBus(t *testing.T) {
 	}
 	defer cancel()
 
-	if err := co.SubmitTask(context.Background(), "task_events", "do something"); err != nil {
+	if err := co.SubmitTask(context.Background(), "task_events", "do something", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestFullPipeline_NonZeroExitCode(t *testing.T) {
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
 	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-	if err := co.SubmitTask(context.Background(), "task_fail_exit", "do something"); err != nil {
+	if err := co.SubmitTask(context.Background(), "task_fail_exit", "do something", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -313,7 +313,7 @@ func TestFullPipeline_SandboxProvisionFailure(t *testing.T) {
 	adapters := []adapter.AgentAdapter{&mockAdapter{name: "test"}}
 	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-	if err := co.SubmitTask(context.Background(), "task_provision_fail", "do something"); err != nil {
+	if err := co.SubmitTask(context.Background(), "task_provision_fail", "do something", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -332,7 +332,7 @@ func TestFullPipeline_VerifyFailure(t *testing.T) {
 	adapters := []adapter.AgentAdapter{&verifyFailAdapter{name: "test"}}
 	co := New(bus, cp, sbox, hub, adapters, nil, 5, nil, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-	if err := co.SubmitTask(context.Background(), "task_verify_fail", "do something"); err != nil {
+	if err := co.SubmitTask(context.Background(), "task_verify_fail", "do something", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -364,7 +364,7 @@ func TestFullPipeline_MultiLineOutput(t *testing.T) {
 	}
 	defer cancel()
 
-	if err := co.SubmitTask(context.Background(), "task_multi", "do something"); err != nil {
+	if err := co.SubmitTask(context.Background(), "task_multi", "do something", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -580,7 +580,7 @@ func TestCoordinatorCrashDetectionAndRetry(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	if err := co.SubmitTask(ctx, "task_crash", "will crash"); err != nil {
+	if err := co.SubmitTask(ctx, "task_crash", "will crash", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -610,7 +610,7 @@ func TestCoordinatorGracefulShutdown(t *testing.T) {
 	defer cancel()
 
 	// Submit a blocking task
-	if err := co.SubmitTask(ctx, "task_shutdown", "blocking task"); err != nil {
+	if err := co.SubmitTask(ctx, "task_shutdown", "blocking task", ""); err != nil {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
@@ -621,7 +621,7 @@ func TestCoordinatorGracefulShutdown(t *testing.T) {
 	co.StopAccepting()
 
 	// New tasks should be rejected
-	if err := co.SubmitTask(ctx, "task_rejected", "should fail"); err == nil {
+	if err := co.SubmitTask(ctx, "task_rejected", "should fail", ""); err == nil {
 		t.Error("expected error after StopAccepting")
 	}
 

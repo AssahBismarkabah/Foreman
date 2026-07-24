@@ -79,17 +79,17 @@ subsystems:
     heartbeat_timeout: 15s
 
   agents:
-    - name: exec
-      kind: exec
-      cmd: sh
-      cwd: /workspace
-      heartbeat_timeout: 60s
     - name: opencode
       kind: opencode
       cmd: npx opencode
       cwd: /tmp/opencode-workspace
       heartbeat_interval: 30s
       heartbeat_timeout: 90s
+    - name: exec
+      kind: exec
+      cmd: sh
+      cwd: /workspace
+      heartbeat_timeout: 60s
 
   plugins:
 %{ if slack_bot_token != "" && slack_app_token != "" ~}

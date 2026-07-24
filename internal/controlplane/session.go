@@ -45,6 +45,7 @@ type Session struct {
 	Status        schemas.SessionStatus
 	TaskID        string
 	Description   string
+	Agent         string
 	CheckpointRef int64 // latest checkpoint ID, 0 = none
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -66,12 +67,13 @@ func New(bus eventbus.EventBus, store statestore.StateStore) *ControlPlane {
 	}
 }
 
-func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID, description string) error {
+func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID, description, agent string) error {
 	s := &Session{
 		ID:          sessionID,
 		Status:      schemas.StatusCreated,
 		TaskID:      taskID,
 		Description: description,
+		Agent:       agent,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -82,6 +84,7 @@ func (cp *ControlPlane) CreateSession(ctx context.Context, sessionID, taskID, de
 			ID:          s.ID,
 			TaskID:      s.TaskID,
 			Description: s.Description,
+			Agent:       s.Agent,
 			Status:      string(s.Status),
 			CreatedAt:   s.CreatedAt,
 			UpdatedAt:   s.UpdatedAt,

@@ -190,7 +190,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 					taskID := fmt.Sprintf("%s_%d", msg.Plugin, time.Now().UnixNano())
 					log.Printf("bootstrap: submitting task from %s: %q", subj, msg.Text)
 					go func() {
-						if err := co.SubmitTask(ctx, taskID, msg.Text); err != nil {
+						if err := co.SubmitTask(ctx, taskID, msg.Text, msg.Agent); err != nil {
 							log.Printf("bootstrap: submit task from %s: %v", subj, err)
 						}
 					}()
@@ -287,7 +287,7 @@ func handleSubmitTask(co *coordinator.Coordinator) http.HandlerFunc {
 			return
 		}
 
-		if err := co.SubmitTask(context.Background(), req.TaskID, req.Description); err != nil {
+		if err := co.SubmitTask(context.Background(), req.TaskID, req.Description, ""); err != nil {
 			log.Printf("api: submit task %s: %v", req.TaskID, err)
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "max concurrent tasks reached") {

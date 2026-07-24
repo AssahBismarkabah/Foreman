@@ -17,7 +17,7 @@ func newTestCP(t *testing.T) (*ControlPlane, context.Context) {
 
 func TestCreateSession(t *testing.T) {
 	cp, ctx := newTestCP(t)
-	err := cp.CreateSession(ctx, "ses_1", "task_1", "")
+	err := cp.CreateSession(ctx, "ses_1", "task_1", "", "")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -36,13 +36,13 @@ func TestCreateSession(t *testing.T) {
 
 func TestDuplicateCreate(t *testing.T) {
 	cp, ctx := newTestCP(t)
-	if err := cp.CreateSession(ctx, "ses_1", "t1", ""); err != nil {
+	if err := cp.CreateSession(ctx, "ses_1", "t1", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	// Creating with same ID overwrites (map assignment) -- not a bug, just
 	// a design choice. The second creation silently replaces the first.
 	// This test documents the current behaviour.
-	if err := cp.CreateSession(ctx, "ses_1", "t2", ""); err != nil {
+	if err := cp.CreateSession(ctx, "ses_1", "t2", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	s, ok := cp.GetSession("ses_1")
@@ -111,7 +111,7 @@ func TestValidTransitions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cp, ctx := newTestCP(t)
-			if err := cp.CreateSession(ctx, "ses_1", "t1", ""); err != nil {
+			if err := cp.CreateSession(ctx, "ses_1", "t1", "", ""); err != nil {
 				t.Fatal(err)
 			}
 
@@ -217,7 +217,7 @@ func TestEmit(t *testing.T) {
 	}
 	defer cancel()
 
-	if err := cp.CreateSession(ctx, "ses_1", "t1", ""); err != nil {
+	if err := cp.CreateSession(ctx, "ses_1", "t1", "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -247,7 +247,7 @@ func TestEmit(t *testing.T) {
 func TestFullHappyPath(t *testing.T) {
 	cp, ctx := newTestCP(t)
 
-	if err := cp.CreateSession(ctx, "ses_1", "task_1", ""); err != nil {
+	if err := cp.CreateSession(ctx, "ses_1", "task_1", "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -267,7 +267,7 @@ func TestFullHappyPath(t *testing.T) {
 func TestFullApprovalPath(t *testing.T) {
 	cp, ctx := newTestCP(t)
 
-	if err := cp.CreateSession(ctx, "ses_1", "task_1", ""); err != nil {
+	if err := cp.CreateSession(ctx, "ses_1", "task_1", "", ""); err != nil {
 		t.Fatal(err)
 	}
 

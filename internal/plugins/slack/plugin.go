@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -178,12 +179,24 @@ func (p *Plugin) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 	}
 	p.ack(evt)
 
+	// Support optional agent prefix: "opencode: fix the bug" or "exec: ls -la"
+	text := cmd.Text
+	agent := ""
+	if idx := strings.Index(text, ":"); idx > 0 && idx < 20 {
+		prefix := strings.TrimSpace(text[:idx])
+		if prefix == "opencode" || prefix == "exec" {
+			agent = prefix
+			text = strings.TrimSpace(text[idx+1:])
+		}
+	}
+
 	// Publish a user.message event for the control plane.
 	msg := schemas.UserMessage{
 		Plugin:  "slack",
 		UserID:  cmd.UserID,
 		Channel: cmd.ChannelID,
-		Text:    cmd.Text,
+		Text:    text,
+		Agent:   agent,
 	}
 	p.publishUserMessage(ctx, msg)
 
@@ -252,11 +265,23 @@ func (p *Plugin) handleEventsAPI(ctx context.Context, evt socketmode.Event) {
 	case *slackevents.MessageEvent:
 		// Only handle direct messages to the bot (im channel)
 		if inner.ChannelType == "im" {
+			// Support optional agent prefix: "opencode: fix the bug" or "exec: ls -la"
+			text := inner.Text
+			agent := ""
+			if idx := strings.Index(text, ":"); idx > 0 && idx < 20 {
+				prefix := strings.TrimSpace(text[:idx])
+				if prefix == "opencode" || prefix == "exec" {
+					agent = prefix
+					text = strings.TrimSpace(text[idx+1:])
+				}
+			}
+
 			msg := schemas.UserMessage{
 				Plugin:  "slack",
 				UserID:  inner.User,
 				Channel: inner.Channel,
-				Text:    inner.Text,
+				Text:    text,
+				Agent:   agent,
 			}
 			p.publishUserMessage(ctx, msg)
 		}
