@@ -325,6 +325,7 @@ jobs:
 
       - name: Run Ansible playbook
         env:
+          FOREMAN_HOST: ${{ needs.apply.outputs.instance_ip }}
           FOREMAN_PG_DSN: ${{ secrets.FOREMAN_PG_DSN }}
           FOREMAN_SIGNING_KEY: ${{ secrets.FOREMAN_SIGNING_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}

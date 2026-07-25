@@ -33,7 +33,9 @@ cd /opt/foreman
 echo "Building custom sandbox image with opencode..."
 cat > /tmp/sandbox-opencode.Dockerfile << 'SANDBOX_DOCKERFILE'
 FROM ubuntu:22.04
-RUN apt-get update && apt-get install -y curl ca-certificates git nodejs npm && \
+RUN apt-get update && apt-get install -y curl ca-certificates git && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
     npm install -g opencode-ai@latest && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 SANDBOX_DOCKERFILE
