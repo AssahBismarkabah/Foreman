@@ -88,7 +88,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 
 	iss := newIssuer(cfg)
 	co := coordinator.New(
-		bus, cp, sbox, mcp, adapters, policies,
+		bus, cp, sbox, mcp, adapters, cfg.Subsystems.Agents, policies,
 		cfg.Subsystems.Coordinator.MaxConcurrent, iss,
 		cfg.Subsystems.Coordinator.HeartbeatInterval,
 		cfg.Subsystems.Coordinator.HeartbeatTimeout,

@@ -16,6 +16,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/foreman/foreman/internal/adapter"
+	"github.com/foreman/foreman/internal/config"
 	"github.com/foreman/foreman/internal/controlplane"
 	"github.com/foreman/foreman/internal/eventbus"
 	"github.com/foreman/foreman/internal/identity"
@@ -40,6 +41,7 @@ type Coordinator struct {
 	mcpHub              mcphub.MCPHub
 	adapters            map[string]adapter.AgentAdapter
 	adapterList         []adapter.AgentAdapter // ordered, for picking the first
+	agentConfigs        map[string]config.AgentConfig // agent name -> config (for sandbox image)
 	policies            []policy.Policy
 	maxConcurrent       int
 	active              map[string]context.CancelFunc
@@ -70,6 +72,7 @@ func New(
 	sbox sandbox.Sandbox,
 	mcpHub mcphub.MCPHub,
 	adapters []adapter.AgentAdapter,
+	agentConfigs []config.AgentConfig,
 	policies []policy.Policy,
 	maxConcurrent int,
 	tokenIssuer *identity.Issuer,
@@ -88,6 +91,10 @@ func New(
 	for _, a := range adapters {
 		adapterMap[a.Name()] = a
 		adapterList = append(adapterList, a)
+	}
+	agentConfigMap := make(map[string]config.AgentConfig)
+	for _, ac := range agentConfigs {
+		agentConfigMap[ac.Name] = ac
 	}
 	if heartbeatInterval <= 0 {
 		heartbeatInterval = 0 // disabled
@@ -117,6 +124,7 @@ func New(
 		mcpHub:             mcpHub,
 		adapters:           adapterMap,
 		adapterList:        adapterList,
+		agentConfigs:       agentConfigMap,
 		policies:           policies,
 		maxConcurrent:      maxConcurrent,
 		active:             make(map[string]context.CancelFunc),
@@ -400,10 +408,15 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description, agen
 	}
 
 	// --- Provision a sandbox ---
-	sandboxID, err := c.sbox.Provision(ctx, sandbox.SandboxSpec{
+	// Use agent-specific sandbox image if configured, otherwise use global default
+	sandboxSpec := sandbox.SandboxSpec{
 		WorkDir: "/workspace",
 		Env:     env,
-	})
+	}
+	if ac, ok := c.agentConfigs[agent.Name()]; ok && ac.SandboxImage != "" {
+		sandboxSpec.Image = ac.SandboxImage
+	}
+	sandboxID, err := c.sbox.Provision(ctx, sandboxSpec)
 	if err != nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("provision sandbox: %w", err))
 		return

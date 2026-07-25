@@ -77,6 +77,7 @@ type AgentConfig struct {
 	Cwd               string        `yaml:"cwd"`
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
 	HeartbeatTimeout  time.Duration `yaml:"heartbeat_timeout"`
+	SandboxImage      string        `yaml:"sandbox_image,omitempty"` // optional per-agent sandbox image
 }
 
 type PluginsConfig struct {

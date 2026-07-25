@@ -96,6 +96,7 @@ subsystems:
       cwd: /tmp/opencode-workspace
       heartbeat_interval: 30s
       heartbeat_timeout: 90s
+      sandbox_image: foreman-sandbox-opencode:latest
     - name: exec
       kind: exec
       cmd: sh

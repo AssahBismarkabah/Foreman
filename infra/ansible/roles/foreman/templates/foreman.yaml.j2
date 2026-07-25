@@ -14,7 +14,7 @@ subsystems:
 
   sandbox:
     kind: docker
-    image: ubuntu:22.04
+    image: foreman-sandbox-opencode:latest
 
   coordinator:
     max_concurrent: 5
@@ -23,17 +23,18 @@ subsystems:
     heartbeat_timeout: 15s
 
   agents:
-    - name: exec
-      kind: exec
-      cmd: sh
-      cwd: /workspace
-      heartbeat_timeout: 60s
     - name: opencode
       kind: opencode
       cmd: npx opencode
       cwd: /tmp/opencode-workspace
       heartbeat_interval: 30s
       heartbeat_timeout: 90s
+      sandbox_image: foreman-sandbox-opencode:latest
+    - name: exec
+      kind: exec
+      cmd: sh
+      cwd: /workspace
+      heartbeat_timeout: 60s
 
 {% if slack_bot_token | length > 0 and slack_app_token | length > 0 or discord_bot_token | length > 0 %}
   plugins:
