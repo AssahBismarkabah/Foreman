@@ -118,10 +118,11 @@ jobs:
               sudo sed -i "/^${key}=/d" /opt/foreman/config/env 2>/dev/null || true
               echo "$pair" | sudo tee -a /opt/foreman/config/env
             done
-            # Ensure LLM env vars are passed to the Docker container
-            # by adding them to the systemd unit file ExecStart if missing.
-            if ! grep -q '\-e OPENAI_API_KEY' /etc/systemd/system/foreman.service 2>/dev/null; then
-              sudo sed -i '/-e DOCKER_HOST \\/a\    -e OPENAI_API_KEY \\\n    -e OPENAI_BASE_URL \\\n    -e OPENAI_MODEL \\' /etc/systemd/system/foreman.service
+            # Migrate the systemd unit file to use --env-file so ALL env vars
+            # in /opt/foreman/config/env (including future additions) flow
+            # to the Docker container automatically.
+            if grep -q '\-e OPENAI_API_KEY' /etc/systemd/system/foreman.service 2>/dev/null; then
+              sudo sed -i '/-e FOREMAN_SIGNING_KEY \\/,/-e OPENAI_MODEL \\/c\    --env-file /opt/foreman/config/env \\' /etc/systemd/system/foreman.service
               sudo systemctl daemon-reload
             fi
             sudo systemctl restart foreman 2>&1 || {
