@@ -244,9 +244,11 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 
 						<-done
 
-						if output.Len() > 0 {
-							_ = plugin.SendMessage(ctx, msg.Channel, schemas.Message{Text: strings.TrimSpace(output.String())})
+						msgText := strings.TrimSpace(output.String())
+						if msgText == "" {
+							msgText = "Task completed with no output."
 						}
+						_ = plugin.SendMessage(ctx, msg.Channel, schemas.Message{Text: msgText})
 					}()
 					return nil
 				},
