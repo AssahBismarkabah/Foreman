@@ -320,9 +320,16 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description, agen
 	})
 
 	// --- Verify the adapter binary ---
-	if err := agent.Verify(ctx); err != nil {
-		c.failSession(ctx, sessionID, fmt.Errorf("adapter verify: %w", err))
-		return
+	// Skip host-side verify when the agent runs inside a sandbox container
+	// (the binary lives in the sandbox image, not in the foreman container).
+	ac, hasSandbox := c.agentConfigs[agent.Name()]
+	if !hasSandbox || ac.SandboxImage == "" {
+		if err := agent.Verify(ctx); err != nil {
+			c.failSession(ctx, sessionID, fmt.Errorf("adapter verify: %w", err))
+			return
+		}
+	} else {
+		log.Printf("coordinator: skipping host-side verify for agent %q (runs in sandbox image %q)", agent.Name(), ac.SandboxImage)
 	}
 
 	// --- Build the agent command ---
