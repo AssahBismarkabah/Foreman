@@ -31,14 +31,19 @@ type Plugin struct {
 	sess   *discordgo.Session
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	// Track deferred slash command interactions so we can edit the "Foreman is thinking..."
+	// response when the agent result arrives. Keyed by channel ID.
+	pendingInteractions map[string]*discordgo.Interaction
 }
 
 // New creates a Discord plugin.
 func New(cfg Config) *Plugin {
 	return &Plugin{
-		cfg:  cfg,
-		name: "discord",
-		done: make(chan struct{}),
+		cfg:                 cfg,
+		name:                "discord",
+		done:                make(chan struct{}),
+		pendingInteractions: make(map[string]*discordgo.Interaction),
 	}
 }
 
@@ -163,12 +168,27 @@ func (p *Plugin) Stop(ctx context.Context) error {
 }
 
 // SendMessage posts a simple text message to a Discord channel.
+// If there is a pending deferred interaction for this channel (from a slash command),
+// it edits the interaction response instead of sending a new message.
 func (p *Plugin) SendMessage(ctx context.Context, channel string, msg schemas.Message) error {
 	p.mu.Lock()
 	sess := p.sess
+	interaction := p.pendingInteractions[channel]
+	if interaction != nil {
+		delete(p.pendingInteractions, channel)
+	}
 	p.mu.Unlock()
+
 	if sess == nil {
 		return fmt.Errorf("discord: not connected (call Start first)")
+	}
+
+	// If we have a pending deferred interaction, edit it to replace "thinking..."
+	if interaction != nil {
+		_, err := sess.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
+			Content: &msg.Text,
+		})
+		return err
 	}
 
 	var params discordgo.MessageSend
@@ -261,6 +281,12 @@ func (p *Plugin) handleSlashCommand(s *discordgo.Session, i *discordgo.Interacti
 		log.Printf("discord: defer response: %v", err)
 		return
 	}
+
+	// Store the interaction so we can edit the "thinking..." message when the
+	// agent result arrives.
+	p.mu.Lock()
+	p.pendingInteractions[i.ChannelID] = i.Interaction
+	p.mu.Unlock()
 
 	// Extract the task text and agent from options.
 	task := ""

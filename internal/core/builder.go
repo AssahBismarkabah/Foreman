@@ -188,10 +188,64 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (_ *App, err error) {
 						return fmt.Errorf("unexpected payload type %T for %s", evt.Payload, subj)
 					}
 					taskID := fmt.Sprintf("%s_%d", msg.Plugin, time.Now().UnixNano())
-					log.Printf("bootstrap: submitting task from %s: %q", subj, msg.Text)
+					sessionID := fmt.Sprintf("ses_%s", taskID)
+					log.Printf("bootstrap: submitting task from %s: %q (session=%s)", subj, msg.Text, sessionID)
 					go func() {
 						if err := co.SubmitTask(ctx, taskID, msg.Text, msg.Agent); err != nil {
 							log.Printf("bootstrap: submit task from %s: %v", subj, err)
+							return
+						}
+
+						// Find the plugin that submitted this task.
+						var plugin plugins.Plugin
+						for _, p := range plugs {
+							if p.Name() == msg.Plugin {
+								plugin = p
+								break
+							}
+						}
+						if plugin == nil {
+							return
+						}
+
+						// Collect agent output and send the result back to the plugin
+						// when the session completes or fails.
+						var output strings.Builder
+						cancelOut, _ := bus.Subscribe(ctx, schemas.Subject("agent", sessionID, "output"),
+							func(ctx context.Context, evt schemas.Event) error {
+								if opencode, ok := evt.Payload.(*adapter.OpenCodeEvent); ok && opencode.Part != nil && opencode.Part.Text != "" {
+									output.WriteString(opencode.Part.Text)
+									output.WriteString("\n")
+								}
+								return nil
+							})
+						defer cancelOut()
+
+						done := make(chan struct{}, 1)
+						cancelDone, _ := bus.Subscribe(ctx, schemas.SessionEventSubject(sessionID, schemas.EvSessionCompleted),
+							func(ctx context.Context, evt schemas.Event) error {
+								select {
+								case done <- struct{}{}:
+								default:
+								}
+								return nil
+							})
+						defer cancelDone()
+
+						cancelFail, _ := bus.Subscribe(ctx, schemas.SessionEventSubject(sessionID, schemas.EvSessionFailed),
+							func(ctx context.Context, evt schemas.Event) error {
+								select {
+								case done <- struct{}{}:
+								default:
+								}
+								return nil
+							})
+						defer cancelFail()
+
+						<-done
+
+						if output.Len() > 0 {
+							_ = plugin.SendMessage(ctx, msg.Channel, schemas.Message{Text: strings.TrimSpace(output.String())})
 						}
 					}()
 					return nil
