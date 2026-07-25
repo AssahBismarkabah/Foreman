@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/foreman/foreman/internal/eventbus"
@@ -114,12 +115,17 @@ func (a *OpenCodeAdapter) BuildConfig(ctx context.Context, cfg BuildConfig) ([]s
 
 // Verify checks that the opencode binary is reachable.
 func (a *OpenCodeAdapter) Verify(ctx context.Context) error {
-	path, err := exec.LookPath(a.cmd)
+	parts := strings.Fields(a.cmd)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty command for opencode adapter")
+	}
+	path, err := exec.LookPath(parts[0])
 	if err != nil {
 		return fmt.Errorf("opencode binary %q not found in PATH: %w", a.cmd, err)
 	}
-	// Quick sanity: run "opencode --version"
-	ver, err := exec.CommandContext(ctx, path, "--version").Output()
+	// Quick sanity: run the full command with "--version".
+	verArgs := append(parts[1:], "--version")
+	ver, err := exec.CommandContext(ctx, path, verArgs...).Output()
 	if err != nil {
 		return fmt.Errorf("opencode version check failed: %w", err)
 	}
@@ -170,19 +176,20 @@ func (a *OpenCodeAdapter) HeartbeatTimeout() time.Duration {
 
 // CheckHealth verifies the opencode binary is still reachable.
 func (a *OpenCodeAdapter) CheckHealth(ctx context.Context) error {
-	_, err := exec.LookPath(a.cmd)
+	parts := strings.Fields(a.cmd)
+	if len(parts) == 0 {
+		return fmt.Errorf("empty command for opencode adapter")
+	}
+	_, err := exec.LookPath(parts[0])
 	return err
 }
 
 // buildRunArgs constructs the CLI args for "opencode run --format json ... <task>".
 // In opencode v1.18.0+:
 //   - The prompt is a positional argument (not -p which is --password).
-//   - --auto auto-approves permission prompts (replaces the older
-//     --permission-mode bypassPermissions which was never shipped).
+//   - --auto auto-approves permission prompts.
+//     See https://opencode.ai/docs/permissions
 func (a *OpenCodeAdapter) buildRunArgs(task string) []string {
-	return []string{
-		a.cmd, "run", "--format", "json",
-		"--auto",
-		task,
-	}
+	parts := strings.Fields(a.cmd)
+	return append(parts, "run", "--format", "json", "--auto", task)
 }
