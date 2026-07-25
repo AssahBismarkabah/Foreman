@@ -23,6 +23,9 @@ ExecStart=/usr/bin/docker run \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e FOREMAN_SIGNING_KEY \
     -e DOCKER_HOST \
+    -e OPENAI_API_KEY \
+    -e OPENAI_BASE_URL \
+    -e OPENAI_MODEL \
     {{ foreman_image }} \
     --config /etc/foreman/foreman.yaml
 
