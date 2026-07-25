@@ -118,6 +118,12 @@ jobs:
               sudo sed -i "/^${key}=/d" /opt/foreman/config/env 2>/dev/null || true
               echo "$pair" | sudo tee -a /opt/foreman/config/env
             done
+            # Ensure LLM env vars are passed to the Docker container
+            # by adding them to the systemd unit file ExecStart if missing.
+            if ! grep -q '\-e OPENAI_API_KEY' /etc/systemd/system/foreman.service 2>/dev/null; then
+              sudo sed -i '/-e DOCKER_HOST \\/a\    -e OPENAI_API_KEY \\\n    -e OPENAI_BASE_URL \\\n    -e OPENAI_MODEL \\' /etc/systemd/system/foreman.service
+              sudo systemctl daemon-reload
+            fi
             sudo systemctl restart foreman 2>&1 || {
               echo "=== Foreman restart failed, collecting diagnostics ==="
               sudo journalctl -u foreman --no-pager -n 80
