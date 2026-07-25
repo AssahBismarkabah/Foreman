@@ -40,7 +40,7 @@ type Coordinator struct {
 	sbox                sandbox.Sandbox
 	mcpHub              mcphub.MCPHub
 	adapters            map[string]adapter.AgentAdapter
-	adapterList         []adapter.AgentAdapter // ordered, for picking the first
+	adapterList         []adapter.AgentAdapter        // ordered, for picking the first
 	agentConfigs        map[string]config.AgentConfig // agent name -> config (for sandbox image)
 	policies            []policy.Policy
 	maxConcurrent       int
