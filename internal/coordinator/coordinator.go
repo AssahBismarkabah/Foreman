@@ -320,16 +320,16 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description, agen
 	})
 
 	// --- Verify the adapter binary ---
-	// Skip host-side verify when the agent runs inside a sandbox container
-	// (the binary lives in the sandbox image, not in the foreman container).
+	// When the agent runs inside a sandbox, the binary lives in the sandbox
+	// image, not in the foreman container. Skip host-side verify; we'll
+	// verify inside the sandbox after provisioning.
 	ac, hasSandbox := c.agentConfigs[agent.Name()]
-	if !hasSandbox || ac.SandboxImage == "" {
+	needsSandboxVerify := hasSandbox && ac.SandboxImage != ""
+	if !needsSandboxVerify {
 		if err := agent.Verify(ctx); err != nil {
 			c.failSession(ctx, sessionID, fmt.Errorf("adapter verify: %w", err))
 			return
 		}
-	} else {
-		log.Printf("coordinator: skipping host-side verify for agent %q (runs in sandbox image %q)", agent.Name(), ac.SandboxImage)
 	}
 
 	// --- Build the agent command ---
@@ -427,6 +427,22 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description, agen
 	if err != nil {
 		c.failSession(ctx, sessionID, fmt.Errorf("provision sandbox: %w", err))
 		return
+	}
+
+	// Verify the agent binary is available inside the sandbox.
+	if needsSandboxVerify {
+		agentCmd := ac.Cmd
+		verifyCmd := []string{"sh", "-c", "command -v " + strings.Fields(agentCmd)[0]}
+		if vr, vErr := c.sbox.Execute(ctx, sandboxID, verifyCmd, 10*time.Second); vErr != nil {
+			c.cleanupSandbox(ctx, sandboxID)
+			c.failSession(ctx, sessionID, fmt.Errorf("sandbox verify: exec %q failed: %w", verifyCmd, vErr))
+			return
+		} else if vr.ExitCode != 0 {
+			c.cleanupSandbox(ctx, sandboxID)
+			c.failSession(ctx, sessionID, fmt.Errorf("sandbox verify: %q not found (exit code %d): %s", verifyCmd, vr.ExitCode, vr.Stderr))
+			return
+		}
+		log.Printf("coordinator: sandbox verify OK for agent %q (binary=%s)", agent.Name(), agentCmd)
 	}
 
 	c.cp.Audit(ctx, sessionID, "coordinator.sandbox_provisioned", map[string]any{
