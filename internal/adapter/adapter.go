@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -191,5 +192,19 @@ func (a *OpenCodeAdapter) CheckHealth(ctx context.Context) error {
 //     See https://opencode.ai/docs/permissions
 func (a *OpenCodeAdapter) buildRunArgs(task string) []string {
 	parts := strings.Fields(a.cmd)
-	return append(parts, "run", "--format", "json", "--auto", task)
+	args := append(parts, "run", "--format", "json", "--auto")
+
+	// opencode ignores OPENAI_MODEL env var and uses its own default model names
+	// (e.g. gpt-5.4-nano, gpt-5.3-chat-latest) which may not exist on the
+	// configured API endpoint. Pass the model explicitly via --model flag.
+	if model := os.Getenv("OPENAI_MODEL"); model != "" {
+		// The provider prefix "openai/" is required by opencode to select the
+		// provider. If it's missing or from a known custom provider, add it.
+		if !strings.Contains(model, "/") {
+			model = "openai/" + model
+		}
+		args = append(args, "--model", model)
+	}
+
+	return append(args, task)
 }
