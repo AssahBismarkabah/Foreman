@@ -6,38 +6,40 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/AssahBismarkabah/Foreman?logo=go)](https://go.dev/doc/install)
 [![Last Commit](https://img.shields.io/github/last-commit/AssahBismarkabah/Foreman?label=updated)](https://github.com/AssahBismarkabah/Foreman/commits/main)
 
----
+----
+
 Foreman is an open source orchestrator that connects team chat to isolated
-agent sandboxes. It acts as a conductor for engineering work -- dispatch
-tasks from Slack or Discord, provision ephemeral sandboxes, track progress,
-gate destructive actions behind human approval, and get results back without
-leaving your channel.
+agent sandboxes. It dispatches tasks from Slack or Discord, provisions ephemeral
+sandboxes, tracks session progress, gates destructive actions behind human
+approval, and reports results back to the channel -- without leaving your chat.
 
-Foreman decides which agents (OpenCode, Claude Code, Codex, etc.) to use for
-a given task, provisions isolated Docker sandboxes, tracks session progress,
-gates destructive actions behind human approval, and reports results back to
-the channel. Agents do the work. Foreman makes sure it is done right.
+Foreman decides which agents ([OpenCode](https://opencode.ai), Claude Code,
+Codex, etc.) to use for a given task, provisions the right sandbox environment
+(Docker, Daytona, ECS, etc.), and makes sure the work is done right.
 
----
+----
 
 ## To start using Foreman
 
-See the [deployment guide](docs/deploy.md) for setup and configuration.
+See the [deployment guide](docs/deploy.md) for setup and configuration using
+the Docker image.
 
 For local development:
 
 ```bash
-make up        # start PostgreSQL via Docker Compose
-make wait-db   # wait for DB to be ready
-make test      # run tests
-make build     # build binary
+git clone https://github.com/AssahBismarkabah/Foreman
+cd Foreman
+make up          # start PostgreSQL via Docker Compose
+make wait-db     # wait for DB to be ready
+make test        # run tests
+make build       # build binary
 ```
 
 ## To start developing Foreman
 
 The [architecture documentation](docs/architecture.md) hosts all information
 about building Foreman from source, how to contribute code and documentation,
-who to contact about what, etc.
+and how the system is designed.
 
 If you want to build Foreman right away there are two options:
 
@@ -53,22 +55,17 @@ make test
 ##### You have a working [Docker environment].
 
 ```
+git clone https://github.com/AssahBismarkabah/Foreman
+cd Foreman
 make docker
 make up
 ```
 
-## Documentation
-
-| Document | Description |
-|---|---|
-| [Deployment Guide](docs/deploy.md) | Deploy Foreman on AWS in ~10 minutes |
-| [Architecture](docs/architecture.md) | System design, components, and interfaces |
-| [Reference Docs](docs/reference/) | Agent adapters, plugins, event bus, sandbox, MCP hub |
-| [Roadmap](docs/TODO.md) | Project tracker across all phases |
-| [Infrastructure README](infra/README.md) | Terraform + Ansible details |
+For the full story, head over to the [architecture documentation](docs/architecture.md).
 
 ## Support
 
+If you need support, start with the [deployment guide](docs/deploy.md).
 If you have questions, reach out through [GitHub Issues].
 
 ## Governance
@@ -76,7 +73,12 @@ If you have questions, reach out through [GitHub Issues].
 Foreman is governed by its maintainers. The [architecture document](docs/architecture.md)
 describes the system design and the decision framework for contributions.
 
-[github.com/AssahBismarkabah/Foreman]: https://github.com/AssahBismarkabah/Foreman
+## Roadmap
+
+The [TODO tracker](docs/TODO.md) covers the full roadmap across five phases:
+Foundation, Communication & Trust, Reliability, Scale & Variety, and Production
+Polish. Feature tracking and backlog are managed through [GitHub Issues].
+
+[GitHub Issues]: https://github.com/AssahBismarkabah/Foreman/issues
 [Go environment]: https://go.dev/doc/install
 [Docker environment]: https://docs.docker.com/engine
-[GitHub Issues]: https://github.com/AssahBismarkabah/Foreman/issues
