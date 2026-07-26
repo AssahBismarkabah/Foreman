@@ -18,16 +18,16 @@ the channel. Agents do the work. Foreman makes sure it is done right.
 
 ## To start using Foreman
 
-See the [quickstart guide](docs/architecture.md) in the architecture doc.
+See the [deployment guide](docs/deploy.md) for setup and configuration.
 
-```
-make up
-```
+For local development:
 
-To use Foreman code as a library in other applications, see the [list of
-internal packages](internal/README.md). Use of the `github.com/foreman/foreman`
-module or `github.com/foreman/foreman/...` packages as libraries is not
-supported.
+```bash
+make up        # start PostgreSQL via Docker Compose
+make wait-db   # wait for DB to be ready
+make test      # run tests
+make build     # build binary
+```
 
 ## To start developing Foreman
 
@@ -53,28 +53,26 @@ make docker
 make up
 ```
 
-For the full story, head over to the [architecture documentation](docs/architecture.md).
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Deployment Guide](docs/deploy.md) | Deploy Foreman on AWS in ~10 minutes |
+| [Architecture](docs/architecture.md) | System design, components, and interfaces |
+| [Reference Docs](docs/reference/) | Agent adapters, plugins, event bus, sandbox, MCP hub |
+| [Roadmap](docs/TODO.md) | Project tracker across all phases |
+| [Infrastructure README](infra/README.md) | Terraform + Ansible details |
 
 ## Support
 
-If you need support, start with the [architecture documentation](docs/architecture.md),
-and work your way through the process that we have outlined.
-
-That said, if you have questions, reach out to us through [GitHub Issues].
+If you have questions, reach out through [GitHub Issues].
 
 ## Governance
 
 Foreman is governed by its maintainers. The [architecture document](docs/architecture.md)
 describes the system design and the decision framework for contributions.
 
-## Roadmap
-
-The [TODO tracker](docs/TODO.md) covers the full roadmap across five phases:
-Foundation, Communication & Trust, Reliability, Scale & Variety, and Production
-Polish. Feature tracking and backlog are managed through [GitHub Issues].
-
 [github.com/AssahBismarkabah/Foreman]: https://github.com/AssahBismarkabah/Foreman
 [Go environment]: https://go.dev/doc/install
 [Docker environment]: https://docs.docker.com/engine
-[architecture documentation]: docs/architecture.md
 [GitHub Issues]: https://github.com/AssahBismarkabah/Foreman/issues

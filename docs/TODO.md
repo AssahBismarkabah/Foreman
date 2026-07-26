@@ -96,7 +96,12 @@ Goal: Operable, documented, ready for real use.
 - [X] Admin API (POST /api/v1/tasks, GET /api/v1/sessions/{id})
 - [ ] Configuration documentation
 - [ ] Onboarding documentation
-- [ ] Deployment guide (Docker Compose, Kubernetes)
+- [X] AWS Infrastructure CI/CD (Terraform + Ansible via GitHub Actions)
+- [X] Discord plugin (slash commands, interaction response, deferred editing)
+- [X] LLM provider config (OPENAI_MODEL env var, --model flag, OpenCode Zen free model)
+- [X] Env var management (--env-file pattern, migration in release workflow)
+- [X] Sandbox Docker image with Node.js 20+ and opencode-ai installed
+- [X] Deployment guide (docs/deploy.md)
 
 ---
 
