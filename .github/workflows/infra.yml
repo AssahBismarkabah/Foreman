@@ -55,6 +55,9 @@ env:
   TF_VAR_slack_app_token: ${{ secrets.SLACK_APP_TOKEN }}
   TF_VAR_discord_bot_token: ${{ secrets.DISCORD_BOT_TOKEN }}
   TF_VAR_ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
   # TF_VAR_ssh_public_key is set dynamically in plan/apply jobs from SSH_PRIVATE_KEY
 
 jobs:
@@ -333,6 +336,9 @@ jobs:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
         run: |
           ansible-playbook \
             -i inventory.yml \
@@ -344,6 +350,9 @@ jobs:
             -e "discord_bot_token=$DISCORD_BOT_TOKEN" \
             -e "ghcr_username=$GHCR_USERNAME" \
             -e "ghcr_token=$GHCR_TOKEN" \
+            -e "openai_api_key=$OPENAI_API_KEY" \
+            -e "openai_base_url=$OPENAI_BASE_URL" \
+            -e "openai_model=$OPENAI_MODEL" \
             playbook.yml
 
   verify:

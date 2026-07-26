@@ -20,3 +20,8 @@ discord_bot_token: "{{ lookup('env', 'DISCORD_BOT_TOKEN') | default('', true) }}
 
 # Signing key (optional - for JWT signing)
 foreman_signing_key: "{{ lookup('env', 'FOREMAN_SIGNING_KEY') | default('', true) }}"
+
+# LLM provider (OpenAI-compatible API for sandbox)
+openai_api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
+openai_base_url: "{{ lookup('env', 'OPENAI_BASE_URL') | default('', true) }}"
+openai_model: "{{ lookup('env', 'OPENAI_MODEL') | default('', true) }}"
