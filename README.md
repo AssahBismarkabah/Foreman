@@ -1,6 +1,11 @@
 # Foreman
 
 [![Release](https://img.shields.io/github/v/release/AssahBismarkabah/Foreman?sort=semver)](https://github.com/AssahBismarkabah/Foreman/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/AssahBismarkabah/Foreman/ci.yml?branch=main&label=CI&logo=github)](https://github.com/AssahBismarkabah/Foreman/actions/workflows/ci.yml)
+[![Infra](https://img.shields.io/github/actions/workflow/status/AssahBismarkabah/Foreman/infra.yml?branch=main&label=Infra&logo=githubactions)](https://github.com/AssahBismarkabah/Foreman/actions/workflows/infra.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/AssahBismarkabah/Foreman?logo=go)](https://go.dev/doc/install)
+[![License](https://img.shields.io/github/license/AssahBismarkabah/Foreman)](LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/AssahBismarkabah/Foreman?label=updated)](https://github.com/AssahBismarkabah/Foreman/commits/main)
 
 ---
 Foreman is an open source orchestrator that connects team chat to isolated
