@@ -6,7 +6,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/AssahBismarkabah/Foreman?logo=go)](https://go.dev/doc/install)
 [![Last Commit](https://img.shields.io/github/last-commit/AssahBismarkabah/Foreman?label=updated)](https://github.com/AssahBismarkabah/Foreman/commits/main)
 
-<img src="docs/diagrams/foreman-badge.png" width="100">
+<img src="docs/diagrams/foreman-badge.png" width="200">
 
 ----
 
