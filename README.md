@@ -1,12 +1,10 @@
 # Foreman
 
-Foreman is an open source orchestrator that connects team chat to isolated
-agent sandboxes. It dispatches tasks from Slack or Discord, provisions ephemeral
-sandboxes, tracks session progress, gates destructive actions behind human
-approval, and reports results back to the channel -- without leaving your chat.
-Foreman decides which agents ([OpenCode](https://opencode.ai), Claude Code,
-Codex, etc.) to use for a given task, provisions the right sandbox environment
-(Docker, Daytona, ECS, etc.), and makes sure the work is done right.
+Run coding agents from your chat, with no infrastructure to manage. No need to
+provision sandboxes, wire up agents, or babysit approvals yourself.
+
+Foreman dispatches tasks from Slack or Discord, provisions isolated sandboxes,
+and reports results back to the channel.
 
 ## Help and Documentation
 
