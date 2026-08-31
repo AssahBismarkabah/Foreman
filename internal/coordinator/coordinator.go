@@ -326,7 +326,12 @@ func (c *Coordinator) runAgent(ctx context.Context, sessionID, description, agen
 	ac, hasSandbox := c.agentConfigs[agent.Name()]
 	needsSandboxVerify := hasSandbox && ac.SandboxImage != ""
 	if !needsSandboxVerify {
-		if err := agent.Verify(ctx); err != nil {
+		// Bound the host-side verify so a hung CLI (e.g. opencode --version)
+		// cannot block the coordinator forever. The sandbox path verifies
+		// inside the container with its own timeout.
+		verifyCtx, verifyCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer verifyCancel()
+		if err := agent.Verify(verifyCtx); err != nil {
 			c.failSession(ctx, sessionID, fmt.Errorf("adapter verify: %w", err))
 			return
 		}

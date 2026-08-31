@@ -1367,6 +1367,7 @@ func TestE2E_OpenCodeAdapter(t *testing.T) {
       kind: opencode
       cmd: opencode
       cwd: /tmp
+      sandbox_image: foreman:e2e-sandbox-opencode
   identity:
     api:
       listen_addr: ":8080"
