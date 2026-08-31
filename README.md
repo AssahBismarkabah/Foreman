@@ -26,19 +26,7 @@ reproduce the issue.
 
 ## Getting started
 
-Run Foreman with Docker:
-
-```
-docker run -d \
-  --name foreman \
-  -p 8080:8080 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e FOREMAN_PG_DSN="postgresql://..." \
-  -e FOREMAN_SIGNING_KEY="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -outform PEM | base64 -w0)" \
-  ghcr.io/assahbismarkabah/foreman:latest
-```
-
-For more details refer to the [deployment guide](docs/deploy.md).
+To run Foreman, see the [deployment guide](docs/deploy.md).
 
 ## Building from Source
 
