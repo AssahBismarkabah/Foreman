@@ -22,7 +22,10 @@ COPY --from=foreman-base /foreman /foreman
 
 # Install opencode CLI globally from npm.
 # The npm package name is "opencode-ai" (not "opencode" -- that returns 404).
-RUN npm install -g opencode-ai@latest
+# Pin the version to match the opencode binary CI installs for the host
+# (see .github/workflows/ci.yml). Using @latest is non-reproducible and
+# has broken the E2E mock LLM contract when a newer version ships.
+RUN npm install -g opencode-ai@1.17.18
 
 # Verify the binary is findable (catches npm install issues early).
 RUN opencode --version

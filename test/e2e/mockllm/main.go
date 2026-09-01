@@ -157,18 +157,49 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	// Streaming response for Responses API
-	// 1) Role announcement
-	writeSSE(w, `{"type":"response.output_item.added","item":{"type":"message","role":"assistant","content":[]}}`)
+	// Opencode validates these events strictly: it needs response.created,
+	// a message output item with content-part metadata, output_text.delta/done,
+	// output_item.done, and a final response.completed. Without the
+	// item_id/output_index/content_index metadata, newer opencode versions
+	// treat the turn as incomplete and re-request forever.
+
+	// 1) response.created
+	writeSSE(w, `{"type":"response.created","response":{"id":"resp_mock_1","object":"response","status":"in_progress","output":[]}}`)
 
 	time.Sleep(50 * time.Millisecond)
 
-	// 2) Content delta
-	writeSSE(w, `{"type":"response.output_text.delta","delta":"Hello from mock LLM. Task completed successfully."}`)
+	// 2) output item added (assistant message)
+	writeSSE(w, `{"type":"response.output_item.added","output_index":0,"item":{"id":"msg_mock_1","type":"message","role":"assistant","status":"in_progress","content":[]}}`)
 
 	time.Sleep(50 * time.Millisecond)
 
-	// 3) Done
-	writeSSE(w, `{"type":"response.completed","response":{"status":"completed"}}`)
+	// 3) content part added
+	writeSSE(w, `{"type":"response.content_part.added","item_id":"msg_mock_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}`)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// 4) output text delta
+	writeSSE(w, `{"type":"response.output_text.delta","item_id":"msg_mock_1","output_index":0,"content_index":0,"delta":"Hello from mock LLM. Task completed successfully."}`)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// 5) output text done
+	writeSSE(w, `{"type":"response.output_text.done","item_id":"msg_mock_1","output_index":0,"content_index":0,"text":"Hello from mock LLM. Task completed successfully."}`)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// 6) content part done
+	writeSSE(w, `{"type":"response.content_part.done","item_id":"msg_mock_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":"Hello from mock LLM. Task completed successfully."}}`)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// 7) output item done
+	writeSSE(w, `{"type":"response.output_item.done","output_index":0,"item":{"id":"msg_mock_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello from mock LLM. Task completed successfully."}]}}`)
+
+	time.Sleep(50 * time.Millisecond)
+
+	// 8) response.completed
+	writeSSE(w, `{"type":"response.completed","response":{"id":"resp_mock_1","object":"response","status":"completed","output":[{"id":"msg_mock_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello from mock LLM. Task completed successfully."}]}]}}`)
 
 	writeDone(w)
 }
